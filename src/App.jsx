@@ -37,12 +37,7 @@ function HomePage({ isActive }) {
   const languages = ['English', 'Urdu', 'Spanish', 'French'];
 
   const handleGlovesClick = () => {
-    if (!glovesConnected) {
-      setGlovesConnected(true);
-      setTimeout(() => {
-        setGlovesConnected(false);
-      }, 2000);
-    }
+    setGlovesConnected(!glovesConnected);
   };
 
   useEffect(() => {

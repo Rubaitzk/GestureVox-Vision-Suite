@@ -28,6 +28,18 @@ A comprehensive web application for **speech recognition, multi-language transla
 - **Smooth Animations**: Polished transitions and loading states
 - **Accessibility**: Keyboard navigation and screen reader support
 - **Mobile First**: Optimized for all screen sizes
+- **Gloves Connection Button**: Hardware integration placeholder for gesture-recognition gloves
+
+## 🔄 Recent Updates (December 2025)
+
+### Bug Fixes & Enhancements
+- ✅ **Speech Synthesis**: Fixed text-to-speech with language-specific voice mapping (Urdu fallback)
+- ✅ **Translation Flow**: Real-time translation to user-selected language (Azure Translator with MyMemory fallback)
+- ✅ **UI Scrolling**: Fixed flex layout issues causing scroll containers to not work
+- ✅ **Language Selector**: Compact horizontal layout instead of 2-column grid
+- ✅ **Chatbot Control Deck**: Combined input field with speak/clear/mic buttons in single control area
+- ✅ **Speech Cancellation**: Clear button now properly cancels active speech synthesis
+- ✅ **Gloves Button**: Hardware connection indicator (toggle on/off with button click)
 
 ## 🚀 Quick Start
 
@@ -90,14 +102,24 @@ The app will open at `http://localhost:5173`
 - Final results saved to message history
 
 #### Translation
-- Free MyMemory Translation API (no authentication needed!)
-- Automatic translation of recognized speech
+- Primary: Azure Translator API (if configured via VITE_LANG_TRANS_API_KEY)
+- Fallback: MyMemory Translation API (free, no key needed)
+- Automatic translation of recognized speech to selected language
 - 100+ languages supported
-- Fallback for translation errors
+- Graceful error handling with original text fallback
 
 #### Chatbot (Chatbot Page)
 - System prompt configured for sign language education
 - Full chat interface with history
+- Google Generative AI (Gemini 2.5-flash-lite model) for responses
+- Combined input + voice controls in bottom control deck
+- Manual speak button (no auto-speak of responses)
+
+#### Text-to-Speech
+- Speaks user-provided text or chatbot responses
+- Language-specific voice selection (English, Spanish, French)
+- Urdu support with browser voice fallback logic
+- Cancel functionality via Clear button
 - Voice input capability
 - Ready for AI API integration (OpenAI, Hugging Face, etc.)
 - Auto-speak responses

@@ -2,7 +2,24 @@
 
 ## Project Status: ✅ COMPLETE & PRODUCTION READY
 
-All refactoring tasks have been completed successfully!
+All refactoring tasks have been completed successfully. Latest updates include real-time translation, fixed text-to-speech, improved UI responsiveness, and gloves hardware integration placeholder.
+
+---
+
+## 🔄 Recent Updates (December 2025)
+
+### December 2025 - Feature Completion
+- ✅ **Speech-to-Text**: Using browser native speech recognition with correct language detection
+- ✅ **Real-time Translation**: Integrated Azure Translator (primary) with MyMemory fallback
+- ✅ **Display Translation**: Both original and translated text shown in message bubbles
+- ✅ **Text-to-Speech Fix**: Fixed speech synthesis with language-specific voice mapping
+- ✅ **Urdu Support**: Added fallback logic for Urdu voices (ur-PK → ur)
+- ✅ **UI Scrolling**: Fixed flex layout constraints (min-height: 0) to enable proper scrolling
+- ✅ **Language Selector**: Compact horizontal layout (single row, overflow-x)
+- ✅ **Chatbot Controls**: Combined input + speak/clear/mic in unified control deck
+- ✅ **Speech Cancellation**: Clear button properly cancels active speech output
+- ✅ **Gloves Hardware Button**: Toggle on/off with button click (stays connected until re-clicked)
+- ✅ **System Prompt Update**: Improved chatbot responses for greetings and out-of-domain queries
 
 ---
 
@@ -32,15 +49,18 @@ All refactoring tasks have been completed successfully!
 - Works in all modern browsers
 
 #### Text-to-Speech (Web Speech Synthesis)
-- Real audio output
+- Real audio output with language-specific voices
+- Support for English, Spanish, French, and Urdu (with fallback)
 - Adjustable rate, pitch, volume
+- Cancel functionality via Clear button
 - Works in all modern browsers
 
-#### Translation (MyMemory API)
-- **FREE** - No API key required!
+#### Translation (Azure Translator + MyMemory Fallback)
+- **Primary**: Azure Translator API (if VITE_LANG_TRANS_API_KEY configured)
+- **Fallback**: MyMemory API - FREE, no API key required!
 - 100+ languages supported
-- Simple REST interface
-- Already tested and working
+- Real-time translation of recognized speech
+- Graceful error handling
 
 ### 4. ✅ Professional Styling
 
@@ -50,6 +70,7 @@ All refactoring tasks have been completed successfully!
 - **Dark theme** - Cyan/indigo color scheme
 - **Animations** - Smooth transitions and effects
 - **Accessibility** - Keyboard navigation ready
+- **Gloves Button**: Hardware integration indicator with connected/not-connected states
 
 ### 5. ✅ Multi-Language Support
 
