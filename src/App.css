@@ -843,3 +843,46 @@
 .opacity-50 {
   opacity: 0.5;
 }
+
+/* ==================== Gloves Button ==================== */
+.gloves-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.gloves-button:hover {
+  background: #334155;
+  color: white;
+}
+
+.gloves-button.connected {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(34, 197, 94, 0.1));
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #22c55e;
+}
+
+.gloves-label {
+  display: block;
+  font-weight: 700;
+  font-size: 0.8rem;
+  margin-bottom: 0.2rem;
+}
+
+.gloves-status {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+

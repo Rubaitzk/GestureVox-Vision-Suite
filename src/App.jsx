@@ -30,10 +30,20 @@ function HomePage({ isActive }) {
   const [selectedLanguage, setSelectedLanguage] = useState('English');
   const [messages, setMessages] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [glovesConnected, setGlovesConnected] = useState(false);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
 
   const languages = ['English', 'Urdu', 'Spanish', 'French'];
+
+  const handleGlovesClick = () => {
+    if (!glovesConnected) {
+      setGlovesConnected(true);
+      setTimeout(() => {
+        setGlovesConnected(false);
+      }, 2000);
+    }
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -117,8 +127,18 @@ function HomePage({ isActive }) {
       Spanish: 'es-ES',
       French: 'fr-FR',
     };
-    const speakLang = langMap[selectedLanguage] || 'en-US';
-    speakText(text, speakLang).catch((e) => console.error('speakText error', e));
+    let speakLang = langMap[selectedLanguage] || 'en-US';
+    // For Urdu, if ur-PK doesn't work, try ur as fallback
+    if (selectedLanguage === 'Urdu') {
+      speakText(text, 'ur-PK')
+        .catch(() => {
+          console.debug('ur-PK failed, trying ur');
+          return speakText(text, 'ur');
+        })
+        .catch((e) => console.error('speakText error', e));
+    } else {
+      speakText(text, speakLang).catch((e) => console.error('speakText error', e));
+    }
   };
 
   const handleLanguageChange = (language) => {
@@ -252,6 +272,15 @@ function HomePage({ isActive }) {
           >
             <span style={{ fontSize: '1.5rem' }}>×</span>
             <span className="control-button-label">Clear</span>
+          </button>
+
+          <button
+            onClick={handleGlovesClick}
+            className={`gloves-button ${glovesConnected ? 'connected' : 'not-connected'}`}
+            title="Gloves connection status"
+          >
+            <span className="gloves-label">Gloves</span>
+            <span className="gloves-status">{glovesConnected ? 'Connected' : 'Not Connected'}</span>
           </button>
         </div>
       </div>
@@ -468,7 +497,22 @@ function ChatbotPage({ isActive }) {
               <button
                 onClick={() => {
                   const last = messages.slice().reverse().find(m => m.role === 'assistant' || m.role === 'user');
-                  if (last) speakText(last.translated || last.text, 'en-US');
+                  if (last) {
+                    const langMap = {
+                      English: 'en-US',
+                      Urdu: 'ur-PK',
+                      Spanish: 'es-ES',
+                      French: 'fr-FR',
+                    };
+                    let speakLang = langMap[selectedLanguage] || 'en-US';
+                    if (selectedLanguage === 'Urdu') {
+                      speakText(last.translated || last.text, 'ur-PK')
+                        .catch(() => speakText(last.translated || last.text, 'ur'))
+                        .catch((e) => console.error('speakText error', e));
+                    } else {
+                      speakText(last.translated || last.text, speakLang);
+                    }
+                  }
                 }}
                 className="control-button secondary"
                 title="Speak last message"
