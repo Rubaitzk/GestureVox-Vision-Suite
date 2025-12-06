@@ -54,43 +54,45 @@ function HomePage({ isActive }) {
     setCurrentTranscript('');
     setTranslatedText('');
 
-    const speechLang = selectedLanguage === 'Urdu' ? 'ur-PK' : 'en-US';
+    const speechLang = navigator.language || 'en-US';
 
     recognitionRef.current = startSpeechRecognition(
       speechLang,
-      async (transcript, isFinal) => {
+      (transcript, isFinal) => {
         setCurrentTranscript(transcript);
 
         if (isFinal) {
-          setIsProcessing(true);
-          try {
-            // Add original message
-            const newMessage = {
-              id: generateMessageId(),
-              source: 'user',
-              text: transcript,
-              language: selectedLanguage,
-              timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, newMessage]);
+          (async () => {
+            setIsProcessing(true);
+            try {
+              // Add original message (source language transcript)
+              const newMessage = {
+                id: generateMessageId(),
+                source: 'user',
+                text: transcript,
+                translated: null,
+                language: navigator.language || 'unknown',
+                timestamp: new Date(),
+              };
+              setMessages((prev) => [...prev, newMessage]);
 
-            // Translate if not English
-            if (selectedLanguage !== 'English') {
-              const translated = await translateText(
-                transcript,
-                LANGUAGE_CODES[selectedLanguage]
-              );
+              // Always attempt translation to the selected target language
+              const targetCode = LANGUAGE_CODES[selectedLanguage] || 'en';
+              const translated = await translateText(transcript, targetCode);
               setTranslatedText(translated);
-            }
+              // update the last message with translated text
+              setMessages((prev) => prev.map(m => m.id === newMessage.id ? { ...m, translated } : m));
 
-            setCurrentTranscript('');
-            setIsListening(false);
-          } catch (error) {
-            console.error('Error:', error);
-            setCurrentTranscript('');
-          } finally {
-            setIsProcessing(false);
-          }
+              setCurrentTranscript('');
+              setIsListening(false);
+            } catch (error) {
+              console.error('Error:', error);
+              setCurrentTranscript('');
+              setIsListening(false);
+            } finally {
+              setIsProcessing(false);
+            }
+          })();
         }
       },
       (error) => {
@@ -172,7 +174,7 @@ function HomePage({ isActive }) {
                 <Mic width="18" height="18" />
               </div>
               <div className={`message-bubble ${msg.source}`}>
-                <p className="message-text">{msg.text}</p>
+                <p className="message-text">{msg.translated || msg.text}</p>
                 <span className="message-time">{formatTime(msg.timestamp)}</span>
               </div>
             </div>
@@ -213,7 +215,8 @@ function HomePage({ isActive }) {
           <button
             onClick={() => {
               if (messages.length > 0) {
-                handleSpeakMessage(messages[messages.length - 1].text);
+                const last = messages[messages.length - 1];
+                handleSpeakMessage(last.translated || last.text);
               }
             }}
             className="control-button secondary"
@@ -282,14 +285,22 @@ function ChatbotPage({ isActive }) {
     }
 
     setIsListening(true);
-    const speechLang = selectedLanguage === 'Urdu' ? 'ur-PK' : 'en-US';
+    const speechLang = navigator.language || 'en-US';
 
     recognitionRef.current = startSpeechRecognition(
       speechLang,
-      (transcript, isFinal) => {
+      async (transcript, isFinal) => {
         if (isFinal) {
-          setInputText(transcript);
-          setIsListening(false);
+          try {
+            const targetCode = LANGUAGE_CODES[selectedLanguage] || 'en';
+            const translated = await translateText(transcript, targetCode);
+            setInputText(translated || transcript);
+          } catch (err) {
+            console.error('Translation during chat input failed:', err);
+            setInputText(transcript);
+          } finally {
+            setIsListening(false);
+          }
         }
       },
       (error) => {
@@ -353,7 +364,7 @@ function ChatbotPage({ isActive }) {
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-      speakText(assistantMessage.text, 'en-US');
+      speakText(assistantMessage.translated || assistantMessage.text, 'en-US');
     } catch (error) {
       console.error('Chatbot error:', error);
       // Show error message to user
@@ -394,7 +405,7 @@ function ChatbotPage({ isActive }) {
                 )}
               </div>
               <div className={`message-bubble ${msg.role === 'user' ? 'user' : 'ai'}`}>
-                <p className="message-text">{msg.text}</p>
+                <p className="message-text">{msg.translated || msg.text}</p>
                 <span className="message-time">{formatTime(msg.timestamp)}</span>
               </div>
             </div>

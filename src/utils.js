@@ -81,25 +81,62 @@ export const speakText = (text, language = 'en-US') => {
 
 export const translateText = async (text, targetLanguage) => {
   try {
-    // Using MyMemory Translation API (free, no authentication required)
-    const response = await fetch(
-      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLanguage}`
-    );
-    
-    if (!response.ok) {
-      throw new Error('Translation API error');
+    // If Azure Translator env vars are present, use Azure Translator (preferred)
+    const azureKey = import.meta.env.VITE_LANG_TRANS_API_KEY;
+    const azureRegion = import.meta.env.VITE_REGION_LANG;
+    const azureEndpoint = import.meta.env.VITE_LANG_TRANS_ENDPOINT || 'https://api.cognitive.microsofttranslator.com';
+
+    if (azureKey) {
+      const url = `${azureEndpoint}/translate?api-version=3.0&to=${encodeURIComponent(targetLanguage)}`;
+
+      const headers = {
+        'Ocp-Apim-Subscription-Key': azureKey,
+        'Content-Type': 'application/json',
+      };
+      if (azureRegion) headers['Ocp-Apim-Subscription-Region'] = azureRegion;
+
+      const body = [{ text }];
+
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`Azure Translator error: ${resp.status} ${errText}`);
+      }
+
+      const data = await resp.json();
+      // response is an array; first item contains translations array
+      if (Array.isArray(data) && data[0] && data[0].translations && data[0].translations[0]) {
+        return data[0].translations[0].text;
+      }
+
+      throw new Error('Unexpected Azure Translator response');
     }
 
-    const data = await response.json();
-    
-    if (data.responseStatus === 200) {
-      return data.responseData.translatedText;
-    } else {
-      throw new Error(data.responseDetails);
-    }
+    // // Fallback to MyMemory Translation API (free, no authentication required)
+    // const response = await fetch(
+    //   `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLanguage}`
+    // );
+
+    // if (!response.ok) {
+    //   throw new Error('Translation API error');
+    // }
+
+    // const data = await response.json();
+
+    // if (data.responseStatus === 200) {
+    //   return data.responseData.translatedText;
+    // } else {
+    //   throw new Error(data.responseDetails);
+    // }
   } catch (error) {
     console.error('Translation error:', error);
-    throw error;
+    // On error return original text as graceful fallback
+    return text;
   }
 };
 
