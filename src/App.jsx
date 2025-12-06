@@ -20,6 +20,7 @@ import {
   generateMessageId,
   CHATBOT_SYSTEM_PROMPT,
 } from './utils.js';
+import { GoogleGenAI } from "@google/genai"; 
 
 // ==================== HOME COMPONENT ====================
 function HomePage({ isActive }) {
@@ -315,40 +316,59 @@ function ChatbotPage({ isActive }) {
     setMessages((prev) => [...prev, userMessage]);
     setInputText('');
 
-    // Simulate API call to chatbot (placeholder for actual API integration)
     setIsLoading(true);
     try {
-      // TODO: Replace with actual chatbot API call
-      // Example integration with OpenAI, Hugging Face, or custom API:
-      // const response = await fetch('/api/chatbot', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     message: userMessage.text,
-      //     systemPrompt: CHATBOT_SYSTEM_PROMPT,
-      //     conversationHistory: messages
-      //   })
-      // });
-      // const data = await response.json();
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('VITE_GEMINI_API_KEY not configured');
+      }
+
+      const client = new GoogleGenAI({ apiKey });
+
+      // Build conversation history for context
+      const conversationHistory = messages.map(m => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.text }]
+      }));
+
+      const response = await client.models.generateContent({
+        model: 'gemini-2.5-flash-lite',
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${CHATBOT_SYSTEM_PROMPT}\n\nConversation history:\n${conversationHistory.map(m => `${m.role}: ${m.parts[0].text}`).join('\n')}\n\nUser: ${inputText}` }]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 500,
+        }
+      });
 
       const assistantMessage = {
         id: generateMessageId(),
         role: 'assistant',
-        text: `I understand you're asking: "${inputText}". To help you better with sign language guidance, I would need to process this through a chatbot API. The system is ready to integrate with services like OpenAI's GPT, Hugging Face, or other AI models that can be configured with the sign language system prompt.`,
+        text: response.text,
         timestamp: new Date(),
       };
 
-      // Simulate API delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
       setMessages((prev) => [...prev, assistantMessage]);
-
-      // Auto-speak the response
       speakText(assistantMessage.text, 'en-US');
+    } catch (error) {
+      console.error('Chatbot error:', error);
+      // Show error message to user
+      const errorMessage = {
+        id: generateMessageId(),
+        role: 'assistant',
+        text: `Error: ${error.message}. Please try again later.`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
   };
+
 
   if (!isActive) return null;
 

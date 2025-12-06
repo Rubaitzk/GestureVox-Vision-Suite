@@ -30,10 +30,15 @@ REACT_APP_OPENAI_KEY=your_api_key_here
 Replace the chatbot logic in `App.jsx`:
 
 ```javascript
-import OpenAI from 'openai';
+import { GoogleGenAI } from "@google/genai";
+import "dotenv/config"; 
 
-const client = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_KEY,
+const myKey = process.env.GEMINI_API_KEY;
+
+CHATBOT_SYSTEM_PROMPT = "The chatbot uses this system prompt to guide responses toward sign language education: You are an expert Sign Language Guide Assistant. Your purpose is to help users learn about sign language, including: 1. Teaching how to sign specific words, phrases, and common expressions 2. Explaining sign language grammar and syntax 3. Providing cultural context about deaf communities 4. Demonstrating finger-spelling techniques 5. Explaining regional sign language variations 6. Helping with accessibility and inclusive communication"
+
+const client = new GoogleGenAI({
+  apiKey: mykey,
   dangerMode: 'ALLOW_BROWSER',
 });
 
@@ -55,7 +60,7 @@ const handleSendMessage = async (e) => {
   setIsLoading(true);
   try {
     const response = await client.chat.completions.create({
-      model: 'gpt-3.5-turbo', // or 'gpt-4'
+      model: "gemini-2.5-flash-lite", 
       messages: [
         {
           role: 'system',
