@@ -106,7 +106,19 @@ function HomePage({ isActive }) {
   };
 
   const handleSpeakMessage = (text) => {
-    speakText(text, 'en-US');
+    if (!text || String(text).trim().length === 0) {
+      console.debug('handleSpeakMessage: no text to speak');
+      return;
+    }
+    console.debug('handleSpeakMessage:', text, 'selectedLanguage=', selectedLanguage);
+    const langMap = {
+      English: 'en-US',
+      Urdu: 'ur-PK',
+      Spanish: 'es-ES',
+      French: 'fr-FR',
+    };
+    const speakLang = langMap[selectedLanguage] || 'en-US';
+    speakText(text, speakLang).catch((e) => console.error('speakText error', e));
   };
 
   const handleLanguageChange = (language) => {
@@ -125,8 +137,8 @@ function HomePage({ isActive }) {
           <p className="home-subtitle">Speak and get real-time translation</p>
         </div>
 
-        {/* Language Selector */}
-        <div className="language-selector">
+        {/* Inline language selector placed under subtitle as a compact grid */}
+        <div className="language-selector" style={{ marginTop: '0.5rem' }}>
           <div className="language-selector-label">
             <Languages />
             <span>Select Output Language</span>
@@ -135,18 +147,12 @@ function HomePage({ isActive }) {
             {languages.map((lang) => (
               <button
                 key={lang}
-                className={`language-button ${
-                  selectedLanguage === lang ? 'active' : ''
-                }`}
+                className={`language-button ${selectedLanguage === lang ? 'active' : ''}`}
                 onClick={() => handleLanguageChange(lang)}
               >
-                <div className="language-button-flag">
-                  {LANGUAGE_FLAGS[lang]}
-                </div>
+                <div className="language-button-flag">{LANGUAGE_FLAGS[lang]}</div>
                 <div className="language-button-name">{lang}</div>
-                <div className="language-button-code">
-                  {LANGUAGE_CODES[lang]}
-                </div>
+                <div className="language-button-code">{LANGUAGE_CODES[lang]}</div>
               </button>
             ))}
           </div>
@@ -238,6 +244,7 @@ function HomePage({ isActive }) {
             className="control-button secondary"
             title="Clear messages"
             onClick={() => {
+              if (window.speechSynthesis) window.speechSynthesis.cancel();
               setMessages([]);
               setCurrentTranscript('');
               setTranslatedText('');
@@ -364,7 +371,6 @@ function ChatbotPage({ isActive }) {
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-      speakText(assistantMessage.translated || assistantMessage.text, 'en-US');
     } catch (error) {
       console.error('Chatbot error:', error);
       // Show error message to user
@@ -423,9 +429,13 @@ function ChatbotPage({ isActive }) {
           )}
         </div>
 
-        {/* Input Area */}
-        <div className="chatbot-input-area">
-          <form onSubmit={handleSendMessage} className="chatbot-input-wrapper">
+        {/* Input Area moved to control deck below */}
+      </div>
+
+      {/* Control Deck for Chatbot (combined input + controls) */}
+      <div className="control-deck">
+        <div style={{ maxWidth: 900, margin: '0 auto', padding: '0 1rem' }}>
+          <form onSubmit={handleSendMessage} className="chatbot-input-wrapper" style={{ marginBottom: '0.75rem' }}>
             <input
               type="text"
               className="chatbot-input"
@@ -453,80 +463,51 @@ function ChatbotPage({ isActive }) {
             </div>
           </form>
 
-          {/* Additional Input Options */}
-          <div className="chatbot-input-icons">
-            <div
-              className="chatbot-input-icon"
-              onClick={() => setSelectedLanguage('English')}
-              title="English"
-            >
-              <span>🇬🇧</span>
-              <span>English</span>
+          <div className="control-buttons" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <button
+                onClick={() => {
+                  const last = messages.slice().reverse().find(m => m.role === 'assistant' || m.role === 'user');
+                  if (last) speakText(last.translated || last.text, 'en-US');
+                }}
+                className="control-button secondary"
+                title="Speak last message"
+              >
+                <Volume2 />
+                <span className="control-button-label">Speak</span>
+              </button>
+
+              <button
+                className="control-button secondary"
+                title="Clear chat"
+                onClick={() => {
+                  // stop any ongoing speech
+                  if (window.speechSynthesis) window.speechSynthesis.cancel();
+                  setMessages([
+                    {
+                      id: generateMessageId(),
+                      role: 'assistant',
+                      text: 'Chat cleared. How can I help you learn sign language today?',
+                      timestamp: new Date(),
+                    },
+                  ]);
+                }}
+              >
+                <span style={{ fontSize: '1.5rem' }}>×</span>
+                <span className="control-button-label">Clear</span>
+              </button>
             </div>
-            <div
-              className="chatbot-input-icon"
-              onClick={() => setSelectedLanguage('Urdu')}
-              title="Urdu"
-            >
-              <span>🇵🇰</span>
-              <span>اردو</span>
-            </div>
-            <div
-              className="chatbot-input-icon"
-              onClick={() => speakText(inputText || 'Ask about sign language', 'en-US')}
-              title="Speak"
-            >
-              <Volume2 width="20" height="20" />
-              <span>Speak</span>
+
+            <div>
+              <button
+                onClick={handleStartListening}
+                className={`control-button primary ${isListening ? 'listening' : ''}`}
+                title={isListening ? 'Stop listening' : 'Start listening'}
+              >
+                {isListening ? <MicOff /> : <Mic />}
+              </button>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Control Deck for Chatbot */}
-      <div className="control-deck">
-        <div className="control-buttons">
-          <button
-            onClick={() =>
-              speakText(
-                messages.length > 0
-                  ? messages[messages.length - 1].text
-                  : 'No messages',
-                'en-US'
-              )
-            }
-            className="control-button secondary"
-            title="Speak last message"
-          >
-            <Volume2 />
-            <span className="control-button-label">Speak</span>
-          </button>
-
-          <button
-            onClick={handleStartListening}
-            className={`control-button primary ${isListening ? 'listening' : ''}`}
-            title={isListening ? 'Stop listening' : 'Start listening'}
-          >
-            {isListening ? <MicOff /> : <Mic />}
-          </button>
-
-          <button
-            className="control-button secondary"
-            title="Clear chat"
-            onClick={() => {
-              setMessages([
-                {
-                  id: generateMessageId(),
-                  role: 'assistant',
-                  text: 'Chat cleared. How can I help you learn sign language today?',
-                  timestamp: new Date(),
-                },
-              ]);
-            }}
-          >
-            <span style={{ fontSize: '1.5rem' }}>×</span>
-            <span className="control-button-label">Clear</span>
-          </button>
         </div>
       </div>
     </div>

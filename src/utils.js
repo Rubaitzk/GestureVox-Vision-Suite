@@ -55,21 +55,74 @@ export const startSpeechRecognition = (language = 'en-US', onResult, onError, on
 
 // ==================== Text-to-Speech Utils ====================
 export const speakText = (text, language = 'en-US') => {
-  if (!('speechSynthesis' in window)) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     console.error('Speech Synthesis API not supported');
-    return;
+    return Promise.resolve();
   }
 
-  // Cancel any ongoing speech
-  window.speechSynthesis.cancel();
+  return new Promise((resolve, reject) => {
+    try {
+      if (!text || String(text).trim().length === 0) {
+        // nothing to speak
+        console.debug('speakText: empty text, skipping');
+        resolve();
+        return;
+      }
+      const synth = window.speechSynthesis;
 
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = language;
-  utterance.rate = 1;
-  utterance.pitch = 1;
-  utterance.volume = 1;
+      // Helper to select a voice that best matches the requested language
+      const pickVoice = (voicesList, lang) => {
+        if (!voicesList || voicesList.length === 0) return null;
+        const normalized = (lang || '').toLowerCase();
+        // exact match first
+        let v = voicesList.find(x => x.lang && x.lang.toLowerCase() === normalized);
+        if (v) return v;
+        // partial match (prefix)
+        const prefix = normalized.split('-')[0];
+        v = voicesList.find(x => x.lang && x.lang.toLowerCase().startsWith(prefix));
+        if (v) return v;
+        // fallback to default
+        return voicesList[0];
+      };
 
-  window.speechSynthesis.speak(utterance);
+      const speakNow = (voices) => {
+        // Cancel any ongoing speech to ensure immediate playback
+        try { synth.cancel(); } catch (e) { /* ignore */ }
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = language;
+        utterance.rate = 1;
+        utterance.pitch = 1;
+        utterance.volume = 1;
+
+        // Use the browser's default voice instead of selecting specific voices
+        // (Some environments expose voices inconsistently; using the default
+        // ensures a single voice is used for all languages as requested.)
+
+        utterance.onstart = () => {
+          console.debug('Speech started');
+        };
+        utterance.onend = () => {
+          resolve();
+        };
+        utterance.onerror = (e) => {
+          console.error('Speech synthesis error', e);
+          resolve();
+        };
+
+        synth.speak(utterance);
+      };
+
+      // Speak immediately using available voices (or none). Waiting for
+      // `voiceschanged` may make the call async and get blocked by browser
+      // autoplay/user-gesture policies. Speaking immediately avoids that.
+      const voices = synth.getVoices();
+      speakNow(voices);
+    } catch (err) {
+      console.error('speakText failed:', err);
+      resolve();
+    }
+  });
 };
 
 // ==================== Translation API Utils ====================
@@ -116,23 +169,22 @@ export const translateText = async (text, targetLanguage) => {
 
       throw new Error('Unexpected Azure Translator response');
     }
+    // Fallback to MyMemory Translation API (free, no authentication required)
+    const response = await fetch(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLanguage}`
+    );
 
-    // // Fallback to MyMemory Translation API (free, no authentication required)
-    // const response = await fetch(
-    //   `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLanguage}`
-    // );
+    if (!response.ok) {
+      throw new Error('Translation API error');
+    }
 
-    // if (!response.ok) {
-    //   throw new Error('Translation API error');
-    // }
+    const data = await response.json();
 
-    // const data = await response.json();
-
-    // if (data.responseStatus === 200) {
-    //   return data.responseData.translatedText;
-    // } else {
-    //   throw new Error(data.responseDetails);
-    // }
+    if (data.responseStatus === 200) {
+      return data.responseData.translatedText;
+    } else {
+      throw new Error(data.responseDetails);
+    }
   } catch (error) {
     console.error('Translation error:', error);
     // On error return original text as graceful fallback
@@ -191,7 +243,20 @@ You are NOT designed to:
 - Translate general content unrelated to sign language
 - Assist with non-sign-language topics
 
-Start each response by acknowledging the user's question about sign language.`;
+Conversation rules:
+- If the user greets (e.g., "hello") or performs simple small-talk, reply briefly and naturally (example: "Hello — how can I help you with sign language today?"). Do not always expand greetings into full sign-language lessons.
+- If the user asks for help about sign language, provide clear, concise guidance. For simple words or phrases, offer a brief description or finger-spelling steps.
+- If the user's request is outside of sign language, reply: "I'm trained to help with sign language topics. I can provide guidance on signing words, grammar, cultural context, and practice tips. For other topics, I can't help." 
+
+When responding:
+- Be clear and educational
+- Use descriptive language to explain hand movements, positions, and facial expressions when teaching signs
+- Provide step-by-step instructions when teaching signs
+- Encourage practice and patience
+- Suggest resources when appropriate
+- Always maintain a respectful tone about deaf culture
+
+Start each sign-language response by acknowledging the user's question when appropriate.`;
 
 // ==================== Format Utilities ====================
 export const formatTime = (date) => {
