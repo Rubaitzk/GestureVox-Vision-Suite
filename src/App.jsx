@@ -20,6 +20,11 @@ import {
   generateMessageId,
   CHATBOT_SYSTEM_PROMPT,
 } from './utils.js';
+import * as sessionService from './services/sessionService';
+import * as authService from './services/authService';
+import HistoryModal from './components/HistoryModal';
+import ProfileModal from './components/ProfileModal';
+import AuthModal from './components/AuthModal';
 import { GoogleGenAI } from "@google/genai"; 
 
 // ==================== HOME COMPONENT ====================
@@ -31,6 +36,7 @@ function HomePage({ isActive }) {
   const [messages, setMessages] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [glovesConnected, setGlovesConnected] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
 
@@ -45,6 +51,60 @@ function HomePage({ isActive }) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, currentTranscript]);
+
+  // initialize or load session/messages
+  useEffect(() => {
+    (async () => {
+      try {
+        const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+        const sessions = await sessionService.getSessions(uid, 'home');
+        if (sessions && sessions.length > 0) {
+          const first = sessions[0];
+          setCurrentSessionId(first.id);
+          const msgs = await sessionService.fetchSessionMessages(uid, 'home', first.id);
+          setMessages((msgs || []).map(m => ({ id: m.home_message_id || generateMessageId(), source: m.sender === 'user' ? 'user' : 'ai', text: m.input_text || m.output_text || '', translated: m.translated_text || null, timestamp: new Date(m.created_at || m.createdAt) })));
+        } else {
+          const ns = await sessionService.createSession(uid, 'home', 'New Home Chat');
+          setCurrentSessionId(ns.id);
+        }
+      } catch (e) {
+        console.error('Home session init failed', e);
+      }
+    })();
+
+    const newHandler = async (e) => {
+      if (e?.detail?.type !== 'home') return;
+      try {
+        const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+        const ns = await sessionService.createSession(uid, 'home', 'New Home Chat');
+        setCurrentSessionId(ns.id);
+        setMessages([]);
+      } catch (err) {
+        console.error('New home session error', err);
+      }
+    };
+
+    const loadHandler = async (e) => {
+      if (e?.detail?.type !== 'home') return;
+      const sid = e?.detail?.sessionId;
+      if (!sid) return;
+      try {
+        const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+        const msgs = await sessionService.fetchSessionMessages(uid, 'home', sid);
+        setCurrentSessionId(sid);
+        setMessages((msgs || []).map(m => ({ id: m.home_message_id || generateMessageId(), source: m.sender === 'user' ? 'user' : 'ai', text: m.input_text || m.output_text || '', translated: m.translated_text || null, timestamp: new Date(m.created_at || m.createdAt) })));
+      } catch (err) {
+        console.error('Load home session failed', err);
+      }
+    };
+
+    window.addEventListener('gv:new-session', newHandler);
+    window.addEventListener('gv:load-session', loadHandler);
+    return () => {
+      window.removeEventListener('gv:new-session', newHandler);
+      window.removeEventListener('gv:load-session', loadHandler);
+    };
+  }, []);
 
   const handleStartListening = () => {
     if (isListening) {
@@ -87,6 +147,18 @@ function HomePage({ isActive }) {
               setTranslatedText(translated);
               // update the last message with translated text
               setMessages((prev) => prev.map(m => m.id === newMessage.id ? { ...m, translated } : m));
+
+              try {
+                const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+                if (!currentSessionId) {
+                  const ns = await sessionService.createSession(uid, 'home', 'New Home Chat');
+                  setCurrentSessionId(ns.id);
+                }
+                const sid = currentSessionId || (await sessionService.getSessions(uid, 'home'))[0].id;
+                await sessionService.addMessage(uid, 'home', sid, { sender: 'user', text: newMessage.text, translated: newMessage.translated });
+              } catch (e) {
+                console.error('Failed to persist home message', e);
+              }
 
               setCurrentTranscript('');
               setIsListening(false);
@@ -285,6 +357,7 @@ function HomePage({ isActive }) {
 
 // ==================== CHATBOT COMPONENT ====================
 function ChatbotPage({ isActive }) {
+  const [currentSessionId, setCurrentSessionId] = useState(null);
   const [messages, setMessages] = useState([
     {
       id: generateMessageId(),
@@ -305,6 +378,65 @@ function ChatbotPage({ isActive }) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  // initialize or load chatbot sessions
+  useEffect(() => {
+    (async () => {
+      try {
+        const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+        const sessions = await sessionService.getSessions(uid, 'chatbot');
+        if (sessions && sessions.length > 0) {
+          const first = sessions[0];
+          setCurrentSessionId(first.id);
+          const msgs = await sessionService.fetchSessionMessages(uid, 'chatbot', first.id);
+          setMessages((msgs || []).map(m => ({ id: m.message_id || generateMessageId(), role: m.sender === 'user' ? 'user' : 'assistant', text: m.input_text || m.output_text || '', translated: m.translated_text || null, timestamp: new Date(m.created_at || m.createdAt) })));
+        } else {
+          const ns = await sessionService.createSession(uid, 'chatbot', 'New Chatbot Chat');
+          setCurrentSessionId(ns.id);
+        }
+      } catch (e) {
+        console.error('Chatbot session init failed', e);
+      }
+    })();
+
+    const newHandler = async (e) => {
+      if (e?.detail?.type !== 'chatbot') return;
+      try {
+        const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+        const ns = await sessionService.createSession(uid, 'chatbot', 'New Chatbot Chat');
+        setCurrentSessionId(ns.id);
+        setMessages([{
+          id: generateMessageId(),
+          role: 'assistant',
+          text: 'New chat started',
+          timestamp: new Date(),
+        }]);
+      } catch (err) {
+        console.error('New chatbot session error', err);
+      }
+    };
+
+    const loadHandler = async (e) => {
+      if (e?.detail?.type !== 'chatbot') return;
+      const sid = e?.detail?.sessionId;
+      if (!sid) return;
+      try {
+        const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+        const msgs = await sessionService.fetchSessionMessages(uid, 'chatbot', sid);
+        setCurrentSessionId(sid);
+        setMessages((msgs || []).map(m => ({ id: m.message_id || generateMessageId(), role: m.sender === 'user' ? 'user' : 'assistant', text: m.input_text || m.output_text || '', translated: m.translated_text || null, timestamp: new Date(m.created_at || m.createdAt) })));
+      } catch (err) {
+        console.error('Load chatbot session failed', err);
+      }
+    };
+
+    window.addEventListener('gv:new-session', newHandler);
+    window.addEventListener('gv:load-session', loadHandler);
+    return () => {
+      window.removeEventListener('gv:new-session', newHandler);
+      window.removeEventListener('gv:load-session', loadHandler);
+    };
+  }, []);
 
   const handleStartListening = () => {
     if (isListening) {
@@ -358,6 +490,19 @@ function ChatbotPage({ isActive }) {
     setMessages((prev) => [...prev, userMessage]);
     setInputText('');
 
+    // persist user message to backend
+    try {
+      const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+      if (!currentSessionId) {
+        const ns = await sessionService.createSession(uid, 'chatbot', 'New Chatbot Chat');
+        setCurrentSessionId(ns.id);
+      }
+      const sid = currentSessionId || (await sessionService.getSessions(uid, 'chatbot'))[0].id;
+      await sessionService.addMessage(uid, 'chatbot', sid, { sender: 'user', text: userMessage.text });
+    } catch (e) {
+      console.error('Failed to persist user chatbot message', e);
+    }
+
     setIsLoading(true);
     try {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -395,6 +540,13 @@ function ChatbotPage({ isActive }) {
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
+      try {
+        const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+        const sid = currentSessionId || (await sessionService.getSessions(uid, 'chatbot'))[0].id;
+        await sessionService.addMessage(uid, 'chatbot', sid, { sender: 'assistant', output: assistantMessage.text });
+      } catch (e) {
+        console.error('Failed to persist assistant chatbot message', e);
+      }
     } catch (error) {
       console.error('Chatbot error:', error);
       // Show error message to user
@@ -556,6 +708,15 @@ function ChatbotPage({ isActive }) {
 // ==================== MAIN APP COMPONENT ====================
 export default function App() {
   const [currentPage, setCurrentPage] = useState('home');
+  const [showHistory, setShowHistory] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+
+  useEffect(() => {
+    const onOpenAuth = () => setShowAuth(true);
+    window.addEventListener('gv:open-auth', onOpenAuth);
+    return () => window.removeEventListener('gv:open-auth', onOpenAuth);
+  }, []);
 
   return (
     <div className="app-container">
@@ -602,9 +763,20 @@ export default function App() {
           </div>
         </header>
 
+        {/* Sub-ribbon with New Chat / History */}
+        <div className="sub-ribbon">
+          <button className="small-btn primary" onClick={() => window.dispatchEvent(new CustomEvent('gv:new-session', { detail: { type: currentPage } }))}>New Chat</button>
+          <button className="small-btn" onClick={() => setShowHistory(true)}>Chat History</button>
+          <button className="small-btn" onClick={() => { const cur = authService.getCurrentUser(); if (cur) setShowProfile(true); else setShowAuth(true); }}>Profile</button>
+        </div>
+
         {/* Page Content */}
         <HomePage isActive={currentPage === 'home'} />
         <ChatbotPage isActive={currentPage === 'chatbot'} />
+
+        <HistoryModal visible={showHistory} onClose={() => setShowHistory(false)} />
+        <ProfileModal visible={showProfile} onClose={() => setShowProfile(false)} />
+        <AuthModal visible={showAuth} onClose={() => setShowAuth(false)} />
       </div>
     </div>
   );

@@ -788,6 +788,79 @@
   }
 }
 
+/* ==================== Sub Ribbon (New Chat / History) ==================== */
+.sub-ribbon {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 1.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  background: rgba(15,23,42,0.6);
+  z-index: 15;
+}
+
+.sub-ribbon .small-btn {
+  padding: 0.4rem 0.8rem;
+  border-radius: 9999px;
+  font-weight: 700;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  background: rgba(255,255,255,0.03);
+  color: #cbd5e1;
+  border: 1px solid rgba(255,255,255,0.03);
+}
+
+.sub-ribbon .small-btn.primary {
+  background: linear-gradient(135deg, #06b6d4, #2563eb);
+  color: white;
+  border: none;
+}
+
+/* ==================== History Modal ==================== */
+.history-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(0,0,0,0.6), rgba(0,0,0,0.85));
+  backdrop-filter: blur(6px);
+  z-index: 60;
+}
+
+.history-modal {
+  width: min(920px, 95%);
+  max-height: 80vh;
+  background: linear-gradient(180deg, rgba(10,10,10,0.98), rgba(20,20,20,0.98));
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+  overflow: auto;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.history-body { display: flex; gap: 1rem; padding-top: 0.75rem; }
+.history-column { flex: 1; }
+.history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.history-item { display:flex; align-items:center; justify-content: space-between; gap: 0.5rem; padding: 0.5rem; border-radius: 8px; background: rgba(255,255,255,0.02); }
+.history-title { font-weight: 700; color: #e2e8f0; }
+.history-meta { font-size: 0.75rem; color: #94a3b8; }
+.history-actions { display:flex; gap: 0.5rem; }
+
+/* small utility buttons */
+.btn { padding: 0.5rem 0.75rem; border-radius: 6px; background: rgba(255,255,255,0.03); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.03); cursor: pointer; }
+.btn.small { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+.btn.danger { background: rgba(239,68,68,0.08); color: #fecaca; border-color: rgba(239,68,68,0.15); }
+
 @media (max-width: 480px) {
   .app-wrapper {
     height: 100vh;

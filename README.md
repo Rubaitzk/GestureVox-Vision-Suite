@@ -118,6 +118,18 @@ The app will open at `http://localhost:5173`
 #### Text-to-Speech
 - Speaks user-provided text or chatbot responses
 - Language-specific voice selection (English, Spanish, French)
+
+### Backend API Endpoints
+- `GET /api/languages` — list available languages
+- `GET /api/user?user_id=` — fetch user profile
+- `PUT /api/user` — update user profile (`user_id`, `name`, `email`, `password`)
+- `GET /api/preferences?user_id=` — get user preferences
+- `POST /api/preferences` — save user preferences
+- `POST /api/tts` — record TTS sessions
+- `GET /api/translation?user_id=` and `POST /api/translation` — translation sessions
+- `POST /api/error` — log an error
+
+Note: `DDL.sql` now includes `home_sessions` and `home_messages` tables used by the frontend for the Home session history.
 - Urdu support with browser voice fallback logic
 - Cancel functionality via Clear button
 - Voice input capability
