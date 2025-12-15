@@ -1,25 +1,18 @@
-from flask import Flask, jsonify, request
-from flask_cors import CORS
+import os
 import mysql.connector
+from flask import Flask, jsonify, request, send_file
+from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
+from gtts import gTTS
+from deep_translator import GoogleTranslator
 
+# 1. INITIALIZE APP (Must be before routes)
 app = Flask(__name__)
-# Enable CORS to allow requests from your React Frontend (usually port 5173)
+# Enable CORS to allow requests from your React Frontend
 CORS(app) 
 
-# Health check
-@app.route('/api/health', methods=['GET'])
-def health():
-    try:
-        conn = get_db_connection()
-        conn.ping(reconnect=True)
-        conn.close()
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "detail": str(e)}), 500
-
 # --- DATABASE CONFIGURATION ---
-# UPDATE THIS with the same password you used in VS Code
+# UPDATE THIS with your actual password
 db_config = {
     'host': 'localhost',
     'user': 'root', 
@@ -31,19 +24,36 @@ def get_db_connection():
     return mysql.connector.connect(**db_config)
 
 # ==========================================
+# HEALTH CHECK
+# ==========================================
+@app.route('/api/health', methods=['GET'])
+def health():
+    try:
+        conn = get_db_connection()
+        conn.ping(reconnect=True)
+        conn.close()
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "detail": str(e)}), 500
+
+# ==========================================
 # AUTHENTICATION ROUTES
 # ==========================================
 
-# 1. SIGNUP (Create a new user)
 @app.route('/api/signup', methods=['POST'])
 def signup():
     data = request.json
     name = data.get('name')
     email = data.get('email')
     password = data.get('password')
-
     if not all([name, email, password]):
         return jsonify({"error": "Missing fields"}), 400
+
+    # Basic validation: require gmail address and minimum password length
+    if not str(email).lower().endswith('@gmail.com'):
+        return jsonify({"error": "Email must be a @gmail.com address"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
 
     # Hash the password for security
     hashed_password = generate_password_hash(password)
@@ -51,35 +61,46 @@ def signup():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
+        # Check if email already exists
+        cursor.execute("SELECT user_id FROM users WHERE email = %s", (email,))
+        existing = cursor.fetchone()
+        if existing:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "Email already in use"}), 409
+
         # Insert user into DB
         query = "INSERT INTO users (name, email, password_hash) VALUES (%s, %s, %s)"
         cursor.execute(query, (name, email, hashed_password))
         conn.commit()
-        
+
         user_id = cursor.lastrowid
         cursor.close()
         conn.close()
-        
+
         return jsonify({"message": "User created", "user_id": user_id}), 201
     except mysql.connector.Error as err:
         return jsonify({"error": str(err)}), 500
 
-# 2. LOGIN (Verify user)
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
     email = data.get('email')
     password = data.get('password')
 
+    if not email or not password:
+        return jsonify({"error": "Missing fields"}), 400
+    if not str(email).lower().endswith('@gmail.com'):
+        return jsonify({"error": "Email must be a @gmail.com address"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    
-    # Find user by email
     query = "SELECT * FROM users WHERE email = %s"
     cursor.execute(query, (email,))
     user = cursor.fetchone()
-    
     cursor.close()
     conn.close()
 
@@ -99,7 +120,6 @@ def login():
 # CHATBOT ROUTES
 # ==========================================
 
-# 3. GET CHAT HISTORY (Sidebar List)
 @app.route('/api/chatbot/history', methods=['GET'])
 def get_chat_history():
     user_id = request.args.get('user_id')
@@ -108,7 +128,6 @@ def get_chat_history():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    # Fetch sessions for this user or client token, newest first
     if client_token:
         query = "SELECT * FROM chatbot_sessions WHERE client_token = %s ORDER BY started_at DESC"
         cursor.execute(query, (client_token,))
@@ -117,12 +136,70 @@ def get_chat_history():
         cursor.execute(query, (user_id,))
 
     sessions = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return jsonify(sessions)
+
+@app.route('/api/chatbot/session', methods=['POST'])
+def create_session():
+    data = request.json
+    user_id = data.get('user_id')
+    client_token = data.get('client_token')
+    try:
+        user_id_val = int(user_id)
+    except Exception:
+        user_id_val = None
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    query = "INSERT INTO chatbot_sessions (user_id, client_token) VALUES (%s, %s)"
+    cursor.execute(query, (user_id_val, client_token))
+    conn.commit()
+    new_session_id = cursor.lastrowid
+    cursor.close()
+    conn.close()
+    return jsonify({"session_id": new_session_id}), 201
+
+@app.route('/api/chatbot/session/<int:session_id>', methods=['DELETE'])
+def delete_chatbot_session(session_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM chatbot_messages WHERE chatbot_session_id = %s", (session_id,))
+        cursor.execute("DELETE FROM chatbot_sessions WHERE chatbot_session_id = %s", (session_id,))
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+    return jsonify({"status": "deleted"}), 200
+
+@app.route('/api/chatbot/message', methods=['POST'])
+def save_message():
+    data = request.json
+    session_id = data.get('chatbot_session_id')
+    sender = data.get('sender')
+    input_text = data.get('input_text')
+    output_text = data.get('output_text')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = """
+        INSERT INTO chatbot_messages 
+        (chatbot_session_id, sender, input_text, output_text) 
+        VALUES (%s, %s, %s, %s)
+    """
+    cursor.execute(query, (session_id, sender, input_text, output_text))
+    conn.commit()
 
     cursor.close()
     conn.close()
 
-    return jsonify(sessions)
+    return jsonify({"status": "saved"}), 201
 
+# ==========================================
+# HOME / HISTORY ROUTES
+# ==========================================
 
 @app.route('/api/home/history', methods=['GET'])
 def get_home_history():
@@ -140,12 +217,9 @@ def get_home_history():
         cursor.execute(query, (user_id,))
 
     sessions = cursor.fetchall()
-
     cursor.close()
     conn.close()
-
     return jsonify(sessions)
-
 
 @app.route('/api/home/session', methods=['POST'])
 def create_home_session():
@@ -153,7 +227,6 @@ def create_home_session():
     user_id = data.get('user_id')
     client_token = data.get('client_token')
     title = data.get('title') or 'Home Session'
-    # accept guest/non-int user ids: store NULL
     try:
         user_id_val = int(user_id)
     except Exception:
@@ -161,17 +234,13 @@ def create_home_session():
 
     conn = get_db_connection()
     cursor = conn.cursor()
-
     query = "INSERT INTO home_sessions (user_id, client_token, title) VALUES (%s, %s, %s)"
     cursor.execute(query, (user_id_val, client_token, title))
     conn.commit()
-
     new_session_id = cursor.lastrowid
     cursor.close()
     conn.close()
-
     return jsonify({"session_id": new_session_id}), 201
-
 
 @app.route('/api/home/message', methods=['POST'])
 def save_home_message():
@@ -183,33 +252,37 @@ def save_home_message():
 
     conn = get_db_connection()
     cursor = conn.cursor()
-
     query = "INSERT INTO home_messages (home_session_id, sender, input_text, translated_text) VALUES (%s, %s, %s, %s)"
     cursor.execute(query, (session_id, sender, input_text, translated))
     conn.commit()
-
     cursor.close()
     conn.close()
-
     return jsonify({"status": "saved"}), 201
-
 
 @app.route('/api/home/messages', methods=['GET'])
 def get_home_messages():
     session_id = request.args.get('session_id')
-
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-
     query = "SELECT * FROM home_messages WHERE home_session_id = %s ORDER BY created_at ASC"
     cursor.execute(query, (session_id,))
     messages = cursor.fetchall()
-
     cursor.close()
     conn.close()
-
     return jsonify(messages)
 
+@app.route('/api/home/session/<int:session_id>', methods=['DELETE'])
+def delete_home_session(session_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM home_messages WHERE home_session_id = %s", (session_id,))
+        cursor.execute("DELETE FROM home_sessions WHERE home_session_id = %s", (session_id,))
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+    return jsonify({"status": "deleted"}), 200
 
 @app.route('/api/history', methods=['GET'])
 def get_all_history():
@@ -231,96 +304,28 @@ def get_all_history():
 
     cursor.close()
     conn.close()
-
     return jsonify({"home": home, "chatbot": chatbot})
 
-# 4. CREATE NEW SESSION (Clicking "New Chat")
-@app.route('/api/chatbot/session', methods=['POST'])
-def create_session():
+@app.route('/api/migrate_sessions', methods=['POST'])
+def migrate_sessions():
     data = request.json
     user_id = data.get('user_id')
     client_token = data.get('client_token')
-    # accept guest/non-int user ids: store NULL in DB
-    try:
-        user_id_val = int(user_id)
-    except Exception:
-        user_id_val = None
+    if not user_id or not client_token:
+        return jsonify({"error": "user_id and client_token required"}), 400
 
     conn = get_db_connection()
     cursor = conn.cursor()
-
-    query = "INSERT INTO chatbot_sessions (user_id, client_token) VALUES (%s, %s)"
-    cursor.execute(query, (user_id_val, client_token))
+    cursor.execute("UPDATE chatbot_sessions SET user_id = %s WHERE client_token = %s", (user_id, client_token))
+    cursor.execute("UPDATE home_sessions SET user_id = %s WHERE client_token = %s", (user_id, client_token))
     conn.commit()
-
-    new_session_id = cursor.lastrowid
     cursor.close()
     conn.close()
-
-    return jsonify({"session_id": new_session_id}), 201
-
-
-# DELETE CHATBOT SESSION (and messages)
-@app.route('/api/chatbot/session/<int:session_id>', methods=['DELETE'])
-def delete_chatbot_session(session_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM chatbot_messages WHERE chatbot_session_id = %s", (session_id,))
-        cursor.execute("DELETE FROM chatbot_sessions WHERE chatbot_session_id = %s", (session_id,))
-        conn.commit()
-    finally:
-        cursor.close()
-        conn.close()
-    return jsonify({"status": "deleted"}), 200
-
-# 5. SAVE MESSAGE (When user sends a message)
-@app.route('/api/chatbot/message', methods=['POST'])
-def save_message():
-    data = request.json
-    session_id = data.get('chatbot_session_id')
-    sender = data.get('sender') # 'user' or 'bot'
-    input_text = data.get('input_text')
-    output_text = data.get('output_text') # If bot, this might be the response
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    query = """
-        INSERT INTO chatbot_messages 
-        (chatbot_session_id, sender, input_text, output_text) 
-        VALUES (%s, %s, %s, %s)
-    """
-    cursor.execute(query, (session_id, sender, input_text, output_text))
-    conn.commit()
-    
-    cursor.close()
-    conn.close()
-    
-    return jsonify({"status": "saved"}), 201
-
-# 6. GET MESSAGES FOR A SPECIFIC SESSION (Clicking a history item)
-@app.route('/api/chatbot/messages', methods=['GET'])
-def get_session_messages():
-    session_id = request.args.get('session_id')
-    
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    
-    query = "SELECT * FROM chatbot_messages WHERE chatbot_session_id = %s ORDER BY created_at ASC"
-    cursor.execute(query, (session_id,))
-    messages = cursor.fetchall()
-    
-    cursor.close()
-    conn.close()
-    
-    return jsonify(messages)
-
+    return jsonify({"status": "migrated"}), 200
 
 # ==========================================
-# LANGUAGES, PREFERENCES, TTS, TRANSLATION, ERRORS
+# USER & PREFERENCES
 # ==========================================
-
 
 @app.route('/api/languages', methods=['GET'])
 def get_languages():
@@ -331,7 +336,6 @@ def get_languages():
     cursor.close()
     conn.close()
     return jsonify(langs)
-
 
 @app.route('/api/user', methods=['GET'])
 def get_user():
@@ -347,7 +351,6 @@ def get_user():
     if not u:
         return jsonify({}), 404
     return jsonify(u)
-
 
 @app.route('/api/user', methods=['PUT'])
 def update_user():
@@ -388,7 +391,6 @@ def update_user():
     conn.close()
     return jsonify({"status": "updated"}), 200
 
-
 @app.route('/api/preferences', methods=['GET', 'POST'])
 def preferences():
     if request.method == 'GET':
@@ -416,7 +418,6 @@ def preferences():
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Check exist
     cursor.execute("SELECT preference_id FROM user_preferences WHERE user_id = %s", (user_id,))
     row = cursor.fetchone()
     if row:
@@ -430,9 +431,12 @@ def preferences():
     conn.close()
     return jsonify({"status": "saved"}), 201
 
-
+# ==========================================
+# SMART TTS ROUTE (Modified to Generate & Save)
+# ==========================================
 @app.route('/api/tts', methods=['GET', 'POST'])
 def tts_sessions_api():
+    # GET: Just fetch history
     if request.method == 'GET':
         user_id = request.args.get('user_id')
         conn = get_db_connection()
@@ -443,24 +447,68 @@ def tts_sessions_api():
         conn.close()
         return jsonify(rows)
 
+    # POST: Smart Generation (Check Cache -> Generate -> Save)
     data = request.json
     user_id = data.get('user_id')
     input_text = data.get('input_text')
-    language_id = data.get('language_id')
-    voice = data.get('voice')
-    audio_path = data.get('audio_path')
-
+    language_code = data.get('language_code', 'en') # e.g. 'en', 'es'
+    
+    # 1. CHECK CACHE
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO tts_sessions (user_id, input_text, language_id, voice, audio_path) VALUES (%s, %s, %s, %s, %s)", (user_id, input_text, language_id, voice, audio_path))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return jsonify({"status": "saved"}), 201
+    cursor = conn.cursor(dictionary=True)
+    
+    # Find language_id for query
+    cursor.execute("SELECT language_id FROM languages WHERE language_code = %s", (language_code,))
+    lang_res = cursor.fetchone()
+    language_id = lang_res['language_id'] if lang_res else 1
 
+    query = "SELECT audio_path FROM tts_sessions WHERE input_text = %s AND language_id = %s LIMIT 1"
+    cursor.execute(query, (input_text, language_id))
+    existing_record = cursor.fetchone()
+    
+    if existing_record:
+        cursor.close()
+        conn.close()
+        return jsonify({"status": "success", "audio_path": existing_record['audio_path'], "cached": True})
 
+    # 2. GENERATE
+    try:
+        # Create unique filename
+        filename = f"tts_{abs(hash(input_text))}_{language_code}.mp3"
+        # Ensure static/audio folder exists
+        save_dir = os.path.join(app.root_path, 'static', 'audio')
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, filename)
+        
+        # Determine URL path (for frontend to access)
+        web_path = f"/static/audio/{filename}"
+
+        tts = gTTS(text=input_text, lang=language_code, slow=False)
+        tts.save(save_path)
+        
+        # 3. SAVE TO DB
+        cursor.execute("""
+            INSERT INTO tts_sessions (user_id, input_text, language_id, voice, audio_path) 
+            VALUES (%s, %s, %s, %s, %s)
+        """, (user_id, input_text, language_id, 'gtts_default', web_path))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"status": "success", "audio_path": web_path, "cached": False})
+
+    except Exception as e:
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
+        return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# SMART TRANSLATION ROUTE (Modified to Translate & Save)
+# ==========================================
 @app.route('/api/translation', methods=['GET', 'POST'])
 def translation_api():
+    # GET: Fetch History
     if request.method == 'GET':
         user_id = request.args.get('user_id')
         conn = get_db_connection()
@@ -471,21 +519,68 @@ def translation_api():
         conn.close()
         return jsonify(rows)
 
+    # POST: Smart Translation (Check Cache -> Translate -> Save)
     data = request.json
     user_id = data.get('user_id')
     input_text = data.get('input_text')
-    output_text = data.get('output_text')
-    source_language_id = data.get('source_language_id')
-    target_language_id = data.get('target_language_id')
+    source_lang = data.get('source_lang', 'en')
+    target_lang = data.get('target_lang', 'es')
 
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO translation_sessions (user_id, input_text, output_text, source_language_id, target_language_id) VALUES (%s, %s, %s, %s, %s)", (user_id, input_text, output_text, source_language_id, target_language_id))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return jsonify({"status": "saved"}), 201
+    cursor = conn.cursor(dictionary=True)
 
+    # Helper to get ID
+    def get_lang_id(code):
+        cursor.execute("SELECT language_id FROM languages WHERE language_code = %s", (code,))
+        res = cursor.fetchone()
+        return res['language_id'] if res else None
+
+    src_id = get_lang_id(source_lang)
+    tgt_id = get_lang_id(target_lang)
+
+    if not src_id or not tgt_id:
+        cursor.close()
+        conn.close()
+        # Fallback if language codes not in DB, try to run anyway but can't cache properly without IDs
+        # For now, just error or default
+        return jsonify({"error": "Invalid language codes provided"}), 400
+
+    # 1. CHECK CACHE
+    query = """
+        SELECT output_text FROM translation_sessions 
+        WHERE input_text = %s AND source_language_id = %s AND target_language_id = %s
+        LIMIT 1
+    """
+    cursor.execute(query, (input_text, src_id, tgt_id))
+    cached = cursor.fetchone()
+
+    if cached:
+        cursor.close()
+        conn.close()
+        return jsonify({"translated_text": cached['output_text'], "cached": True})
+
+    # 2. TRANSLATE
+    try:
+        translator = GoogleTranslator(source=source_lang, target=target_lang)
+        translated_text = translator.translate(input_text)
+
+        # 3. SAVE TO DB
+        cursor.execute("""
+            INSERT INTO translation_sessions 
+            (user_id, input_text, output_text, source_language_id, target_language_id) 
+            VALUES (%s, %s, %s, %s, %s)
+        """, (user_id, input_text, translated_text, src_id, tgt_id))
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({"translated_text": translated_text, "cached": False})
+
+    except Exception as e:
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/error', methods=['POST'])
 def log_error():
@@ -493,51 +588,20 @@ def log_error():
     user_id = data.get('user_id')
     error_type = data.get('error_type')
     message = data.get('message')
+    context = data.get('context')
+
+    # Compose a combined message that includes context if provided
+    full_message = message or ''
+    if context:
+        full_message = f"{full_message} | context: {context}"
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO error_logs (user_id, error_type, message) VALUES (%s, %s, %s)", (user_id, error_type, message))
+    cursor.execute("INSERT INTO error_logs (user_id, error_type, message) VALUES (%s, %s, %s)", (user_id, error_type, full_message))
     conn.commit()
     cursor.close()
     conn.close()
     return jsonify({"status": "logged"}), 201
-
-
-@app.route('/api/migrate_sessions', methods=['POST'])
-def migrate_sessions():
-    data = request.json
-    user_id = data.get('user_id')
-    client_token = data.get('client_token')
-
-    if not user_id or not client_token:
-        return jsonify({"error": "user_id and client_token required"}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("UPDATE chatbot_sessions SET user_id = %s WHERE client_token = %s", (user_id, client_token))
-    cursor.execute("UPDATE home_sessions SET user_id = %s WHERE client_token = %s", (user_id, client_token))
-    conn.commit()
-    affected = cursor.rowcount
-    cursor.close()
-    conn.close()
-
-    return jsonify({"status": "migrated"}), 200
-
-
-# DELETE HOME SESSION (and messages)
-@app.route('/api/home/session/<int:session_id>', methods=['DELETE'])
-def delete_home_session(session_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM home_messages WHERE home_session_id = %s", (session_id,))
-        cursor.execute("DELETE FROM home_sessions WHERE home_session_id = %s", (session_id,))
-        conn.commit()
-    finally:
-        cursor.close()
-        conn.close()
-    return jsonify({"status": "deleted"}), 200
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

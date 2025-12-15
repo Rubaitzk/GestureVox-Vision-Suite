@@ -47,6 +47,14 @@ def apply_ddl():
             print('Statement failed:', stmt[:120].replace('\n', ' '), '...')
             print('Error:', e)
 
+    # Ensure error_logs has context column for richer debugging (best-effort)
+    try:
+        cursor.execute("ALTER TABLE error_logs ADD COLUMN context TEXT")
+        print('Added context column to error_logs')
+    except Exception as e:
+        # column likely exists or DB doesn't support ALTER in this context; ignore
+        print('Could not add context column (may already exist):', e)
+
     cursor.close()
     conn.close()
     print('DDL applied (best-effort).')

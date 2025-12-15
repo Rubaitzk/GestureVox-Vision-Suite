@@ -22,6 +22,7 @@ import {
 } from './utils.js';
 import * as sessionService from './services/sessionService';
 import * as authService from './services/authService';
+import * as userService from './services/userService';
 import HistoryModal from './components/HistoryModal';
 import ProfileModal from './components/ProfileModal';
 import AuthModal from './components/AuthModal';
@@ -158,12 +159,16 @@ function HomePage({ isActive }) {
                 await sessionService.addMessage(uid, 'home', sid, { sender: 'user', text: newMessage.text, translated: newMessage.translated });
               } catch (e) {
                 console.error('Failed to persist home message', e);
+                const uid = (authService.getCurrentUser() || {}).user_id || null;
+                userService.logError({ user_id: uid, error_type: 'db', message: String(e), context: 'persist_home_message' }).catch(() => {});
               }
 
               setCurrentTranscript('');
               setIsListening(false);
             } catch (error) {
               console.error('Error:', error);
+              const uid = (authService.getCurrentUser() || {}).user_id || null;
+              userService.logError({ user_id: uid, error_type: 'home_processing', message: String(error), context: 'home_listen_process' }).catch(() => {});
               setCurrentTranscript('');
               setIsListening(false);
             } finally {
@@ -459,8 +464,10 @@ function ChatbotPage({ isActive }) {
             const translated = await translateText(transcript, targetCode);
             setInputText(translated || transcript);
           } catch (err) {
-            console.error('Translation during chat input failed:', err);
-            setInputText(transcript);
+                console.error('Translation during chat input failed:', err);
+                const uid = (authService.getCurrentUser() || {}).user_id || null;
+                userService.logError({ user_id: uid, error_type: 'translation', message: String(err), context: 'chatbot_input_translation' }).catch(() => {});
+                setInputText(transcript);
           } finally {
             setIsListening(false);
           }
@@ -501,6 +508,8 @@ function ChatbotPage({ isActive }) {
       await sessionService.addMessage(uid, 'chatbot', sid, { sender: 'user', text: userMessage.text });
     } catch (e) {
       console.error('Failed to persist user chatbot message', e);
+      const uid = (authService.getCurrentUser() || {}).user_id || null;
+      userService.logError({ user_id: uid, error_type: 'db', message: String(e), context: 'persist_user_chatbot_message' }).catch(() => {});
     }
 
     setIsLoading(true);
@@ -546,9 +555,14 @@ function ChatbotPage({ isActive }) {
         await sessionService.addMessage(uid, 'chatbot', sid, { sender: 'assistant', output: assistantMessage.text });
       } catch (e) {
         console.error('Failed to persist assistant chatbot message', e);
+        const uid = (authService.getCurrentUser() || {}).user_id || null;
+        userService.logError({ user_id: uid, error_type: 'db', message: String(e), context: 'persist_assistant_chatbot_message' }).catch(() => {});
       }
     } catch (error) {
       console.error('Chatbot error:', error);
+      // Log external API failures (Gemini/translation) to error_logs for later inspection
+      const uid = (authService.getCurrentUser() || {}).user_id || null;
+      userService.logError({ user_id: uid, error_type: 'chatbot_api', message: String(error), context: `generateContent input=${inputText}` }).catch(() => {});
       // Show error message to user
       const errorMessage = {
         id: generateMessageId(),

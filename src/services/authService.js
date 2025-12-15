@@ -1,4 +1,4 @@
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:5000/api/health';
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:5000';
 
 function getClientToken() {
   let t = localStorage.getItem('gv_client_token');

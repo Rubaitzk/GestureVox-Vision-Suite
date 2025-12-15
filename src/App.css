@@ -839,6 +839,39 @@
   border: 1px solid rgba(255,255,255,0.04);
 }
 
+/* Form error text shown in modals */
+.error-text {
+  color: #ff6b6b; /* readable red */
+  font-weight: 700;
+  margin-top: 0.25rem;
+}
+
+/* Modal form controls: ensure labels and inputs are readable on dark background */
+.history-modal label {
+  color: #ffffff;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.history-modal input,
+.history-modal select,
+.history-modal textarea {
+  background: rgba(255,255,255,0.02);
+  color: #ffffff;
+  border: 1px solid rgba(255,255,255,0.06);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+.history-modal input::placeholder,
+.history-modal textarea::placeholder {
+  color: rgba(255,255,255,0.5);
+}
+.history-modal input:disabled,
+.history-modal select:disabled,
+.history-modal textarea:disabled {
+  opacity: 0.7;
+}
+
 .history-header {
   display: flex;
   justify-content: space-between;

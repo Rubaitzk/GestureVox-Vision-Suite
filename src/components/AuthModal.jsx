@@ -15,6 +15,18 @@ export default function AuthModal({ visible, onClose }) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    // Client-side validation
+    const emailLower = (email || '').toLowerCase();
+    if (!emailLower.endsWith('@gmail.com')) {
+      setError('Email must be a @gmail.com address');
+      setLoading(false);
+      return;
+    }
+    if (!password || password.length < 8) {
+      setError('Password must be at least 8 characters');
+      setLoading(false);
+      return;
+    }
     try {
       if (mode === 'signup') {
         await authService.signup({ name, email, password });
@@ -51,7 +63,7 @@ export default function AuthModal({ visible, onClose }) {
             <label>Password</label>
             <input value={password} onChange={(e) => setPassword(e.target.value)} required type="password" />
 
-            {error && <div className="muted" style={{ color: 'var(--danger)' }}>{error}</div>}
+            {error && <div className="muted error-text">{error}</div>}
 
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
               <button className="btn primary" disabled={loading}>{loading ? 'Please wait...' : (mode === 'signup' ? 'Sign up' : 'Login')}</button>
