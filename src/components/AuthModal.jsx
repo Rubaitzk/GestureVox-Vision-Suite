@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import * as authService from '../services/authService';
+import { User, Mail, Lock } from 'lucide-react';
 
 export default function AuthModal({ visible, onClose }) {
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
@@ -44,30 +45,43 @@ export default function AuthModal({ visible, onClose }) {
   return (
     <div className="history-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="history-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="history-header">
-          <h3>{mode === 'signup' ? 'Sign up' : 'Login'}</h3>
+        <div className="history-header auth-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div className="auth-header-icon">
+              {mode === 'signup' ? <User /> : <Lock />}
+            </div>
+            <div>
+              <h3 style={{ margin: 0 }}>{mode === 'signup' ? 'Create your account' : 'Welcome back'}</h3>
+              <p className="auth-subtitle">{mode === 'signup' ? 'Sign up to save history & preferences' : 'Sign in to continue'}</p>
+            </div>
+          </div>
           <button className="btn small" onClick={onClose}>Close</button>
         </div>
-        <div className="history-body">
-          <form onSubmit={submit} style={{ display: 'grid', gap: '0.5rem' }}>
+
+        <div className="history-body auth-body">
+          <form onSubmit={submit} className="auth-modal-content">
             {mode === 'signup' && (
-              <>
-                <label>Name</label>
-                <input value={name} onChange={(e) => setName(e.target.value)} required />
-              </>
+              <div className="auth-field">
+                <User className="auth-field-icon" />
+                <input className="auth-input" placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} required />
+              </div>
             )}
 
-            <label>Email</label>
-            <input value={email} onChange={(e) => setEmail(e.target.value)} required type="email" />
+            <div className="auth-field">
+              <Mail className="auth-field-icon" />
+              <input className="auth-input" placeholder="your.email@gmail.com" value={email} onChange={(e) => setEmail(e.target.value)} required type="email" />
+            </div>
 
-            <label>Password</label>
-            <input value={password} onChange={(e) => setPassword(e.target.value)} required type="password" />
+            <div className="auth-field">
+              <Lock className="auth-field-icon" />
+              <input className="auth-input" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required type="password" />
+            </div>
 
             {error && <div className="muted error-text">{error}</div>}
 
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-              <button className="btn primary" disabled={loading}>{loading ? 'Please wait...' : (mode === 'signup' ? 'Sign up' : 'Login')}</button>
-              <button type="button" className="btn" onClick={() => setMode(mode === 'signup' ? 'login' : 'signup')}>{mode === 'signup' ? 'Switch to Login' : 'Switch to Sign up'}</button>
+            <div className="auth-actions">
+              <button className="btn primary auth-submit" disabled={loading}>{loading ? 'Please wait...' : (mode === 'signup' ? 'Create account' : 'Sign in')}</button>
+              <button type="button" className="btn" onClick={() => setMode(mode === 'signup' ? 'login' : 'signup')}>{mode === 'signup' ? 'Have an account? Login' : "Don't have an account? Sign up"}</button>
             </div>
           </form>
         </div>

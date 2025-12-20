@@ -1,5 +1,6 @@
 import os
 import mysql.connector
+import random
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -21,7 +22,27 @@ db_config = {
 }
 
 def get_db_connection():
-    return mysql.connector.connect(**db_config)
+    # Try default connection first. Some MySQL servers (MySQL 8+) use
+    # caching_sha2_password as the default authentication plugin which
+    # can cause the client library to error if it doesn't support it.
+    try:
+        return mysql.connector.connect(**db_config)
+    except mysql.connector.Error as e:
+        msg = str(e).lower()
+        # If the error is related to caching_sha2_password, retry with
+        # the older mysql_native_password plugin (best-effort fallback).
+        if 'caching_sha2_password' in msg or 'auth plugin' in msg:
+            cfg = dict(db_config)
+            cfg['auth_plugin'] = 'mysql_native_password'
+            try:
+                conn = mysql.connector.connect(**cfg)
+                # annotate connection object for diagnostics
+                setattr(conn, '_auth_fallback_used', True)
+                return conn
+            except Exception:
+                # If fallback also fails, raise original exception for clarity
+                raise
+        raise
 
 # ==========================================
 # HEALTH CHECK
@@ -35,6 +56,18 @@ def health():
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         return jsonify({"status": "error", "detail": str(e)}), 500
+
+
+# Simple glove simulate endpoint: returns a random gesture text (one-off trigger)
+@app.route('/api/glove/simulate', methods=['GET'])
+def glove_simulate():
+    gestures = [
+        "Hello, how are you?",
+        "Please help me",
+        "I am feeling unwell",
+        "Thank you very much",
+    ]
+    return jsonify({"status": "glove_on", "gesture_text": random.choice(gestures)})
 
 # ==========================================
 # AUTHENTICATION ROUTES

@@ -23,6 +23,7 @@ import {
 import * as sessionService from './services/sessionService';
 import * as authService from './services/authService';
 import * as userService from './services/userService';
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:5000';
 import HistoryModal from './components/HistoryModal';
 import ProfileModal from './components/ProfileModal';
 import AuthModal from './components/AuthModal';
@@ -31,12 +32,14 @@ import { GoogleGenAI } from "@google/genai";
 // ==================== HOME COMPONENT ====================
 function HomePage({ isActive }) {
   const [isListening, setIsListening] = useState(false);
+  const [glovesConnected, setGlovesConnected] = useState(false);
+  const [glovesProcessing, setGlovesProcessing] = useState(false);
   const [currentTranscript, setCurrentTranscript] = useState('');
   const [translatedText, setTranslatedText] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('English');
   const [messages, setMessages] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [glovesConnected, setGlovesConnected] = useState(false);
+  // const [glovesConnected, setGlovesConnected] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
@@ -44,7 +47,59 @@ function HomePage({ isActive }) {
   const languages = ['English', 'Urdu', 'Spanish', 'French'];
 
   const handleGlovesClick = () => {
-    setGlovesConnected(!glovesConnected);
+    // Toggle connection: when connecting, fetch one glove gesture and process it
+    if (glovesConnected) {
+      setGlovesConnected(false);
+      return;
+    }
+
+    // connect and process one gesture
+    (async () => {
+      setGlovesConnected(true);
+      try {
+        setIsProcessing(true);
+        const res = await fetch(`${BACKEND}/api/glove/simulate`);
+        if (!res.ok) throw new Error('Glove simulate failed');
+        const data = await res.json();
+        const text = data.gesture_text;
+
+        // create a new user message and attempt translation like mic
+        const newMessage = {
+          id: generateMessageId(),
+          source: 'user',
+          text,
+          translated: null,
+          language: navigator.language || 'unknown',
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, newMessage]);
+
+        try {
+          const targetCode = LANGUAGE_CODES[selectedLanguage] || 'en';
+          const translated = await translateText(text, targetCode);
+          setMessages((prev) => prev.map(m => m.id === newMessage.id ? { ...m, translated } : m));
+
+          // persist
+          const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+          if (!currentSessionId) {
+            const ns = await sessionService.createSession(uid, 'home', 'New Home Chat');
+            setCurrentSessionId(ns.id);
+          }
+          const sid = currentSessionId || (await sessionService.getSessions(uid, 'home'))[0].id;
+          await sessionService.addMessage(uid, 'home', sid, { sender: 'user', text, translated });
+        } catch (e) {
+          console.error('Glove processing failed', e);
+          const uid = (authService.getCurrentUser() || {}).user_id || null;
+          userService.logError({ user_id: uid, error_type: 'glove', message: String(e), context: 'home_glove_process' }).catch(() => {});
+        }
+      } catch (e) {
+        console.error('Glove simulate error', e);
+        const uid = (authService.getCurrentUser() || {}).user_id || null;
+        userService.logError({ user_id: uid, error_type: 'glove_simulate', message: String(e), context: 'glove_fetch' }).catch(() => {});
+      } finally {
+        setIsProcessing(false);
+      }
+    })();
   };
 
   useEffect(() => {
@@ -375,6 +430,9 @@ function ChatbotPage({ isActive }) {
   const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('English');
+  // Gloves state used by the chatbot control buttons (was missing and caused a runtime error)
+  const [glovesConnected, setGlovesConnected] = useState(false);
+  const [glovesProcessing, setGlovesProcessing] = useState(false);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
 
@@ -655,6 +713,41 @@ function ChatbotPage({ isActive }) {
 
           <div className="control-buttons" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <button
+                onClick={async () => {
+                  if (glovesProcessing) return;
+                  if (glovesConnected) { setGlovesConnected(false); return; }
+                  setGlovesConnected(true);
+                  setGlovesProcessing(true);
+                  try {
+                    const res = await fetch(`${BACKEND}/api/glove/simulate`);
+                    if (!res.ok) throw new Error('Glove simulate failed');
+                    const data = await res.json();
+                    const text = data.gesture_text;
+                    try {
+                      const targetCode = LANGUAGE_CODES[selectedLanguage] || 'en';
+                      const translated = await translateText(text, targetCode);
+                      setInputText(translated || text);
+                    } catch (err) {
+                      console.error('Glove translation failed', err);
+                      const uid = (authService.getCurrentUser() || {}).user_id || null;
+                      userService.logError({ user_id: uid, error_type: 'glove', message: String(err), context: 'chatbot_glove_translate' }).catch(() => {});
+                      setInputText(text);
+                    }
+                  } catch (e) {
+                    console.error('Glove simulate error', e);
+                    const uid = (authService.getCurrentUser() || {}).user_id || null;
+                    userService.logError({ user_id: uid, error_type: 'glove_simulate', message: String(e), context: 'chatbot_glove_fetch' }).catch(() => {});
+                  } finally {
+                    setGlovesProcessing(false);
+                  }
+                }}
+                className={`gloves-button ${glovesConnected ? 'connected' : 'not-connected'}`}
+                title="Gloves connection status"
+              >
+                <span className="gloves-label">Gloves</span>
+                <span className="gloves-status">{glovesConnected ? 'Connected' : 'Not Connected'}</span>
+              </button>
               <button
                 onClick={() => {
                   const last = messages.slice().reverse().find(m => m.role === 'assistant' || m.role === 'user');

@@ -99,14 +99,28 @@ export default function ProfileModal({ visible, onClose }) {
   return (
     <div className="history-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="history-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="history-header">
-          <h3>Profile</h3>
-          <button className="small-btn" onClick={onClose}>Close</button>
+        <div className="history-header profile-header">
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            <div className="profile-avatar">{(user.name || 'U').charAt(0).toUpperCase()}</div>
+            <div>
+              <div className="profile-name">{user.name || 'Guest'}</div>
+              <div className="profile-email">{user.email || ''}</div>
+              <div className="profile-chips">
+                <div className="profile-chip">{(languages.find(l => l.language_id === Number(prefs.preferred_language_id)) || {}).language_name || 'Language: -'}</div>
+                <div className="profile-chip">Theme: {prefs.theme || 'Default'}</div>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn small" onClick={onClose}>Close</button>
+          </div>
         </div>
+
         <div className="history-body">
           <div style={{ display: 'grid', gap: '0.5rem' }}>
             <label>Name</label>
             <input 
+              className="auth-input"
               value={user.name || ''} 
               onChange={(e) => setUser({ ...user, name: e.target.value })} 
               disabled={!isLoggedIn}
@@ -114,6 +128,7 @@ export default function ProfileModal({ visible, onClose }) {
 
             <label>Email</label>
             <input 
+              className="auth-input"
               value={user.email || ''} 
               onChange={(e) => setUser({ ...user, email: e.target.value })} 
               disabled={!isLoggedIn}
@@ -121,6 +136,7 @@ export default function ProfileModal({ visible, onClose }) {
 
             <label>Preferred Language</label>
             <select 
+              className="auth-input"
               value={prefs.preferred_language_id || ''} 
               onChange={(e) => setPrefs({ ...prefs, preferred_language_id: e.target.value })}
               disabled={!isLoggedIn}
@@ -133,6 +149,7 @@ export default function ProfileModal({ visible, onClose }) {
 
             <label>Theme</label>
             <select 
+              className="auth-input"
               value={prefs.theme || ''} 
               onChange={(e) => setPrefs({ ...prefs, theme: e.target.value })}
               disabled={!isLoggedIn}
@@ -145,19 +162,19 @@ export default function ProfileModal({ visible, onClose }) {
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
               {isLoggedIn ? (
                 <>
-                  <button className="control-button primary" onClick={save} disabled={saving}>
+                  <button className="btn primary" onClick={save} disabled={saving}>
                     {saving ? 'Saving...' : 'Save'}
                   </button>
-                  <button className="control-button secondary" onClick={() => { authService.logout(); onClose(); }}>
+                  <button className="btn" onClick={() => { authService.logout(); onClose(); }}>
                     Logout
                   </button>
                 </>
               ) : (
                 <>
-                  <button className="control-button primary" onClick={() => { window.dispatchEvent(new CustomEvent('gv:open-auth')); onClose(); }}>
+                  <button className="btn primary" onClick={() => { window.dispatchEvent(new CustomEvent('gv:open-auth')); onClose(); }}>
                     Sign in
                   </button>
-                  <button className="control-button secondary" onClick={onClose}>
+                  <button className="btn" onClick={onClose}>
                     Close
                   </button>
                 </>
