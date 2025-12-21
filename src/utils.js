@@ -274,6 +274,69 @@ export const LANGUAGE_FLAGS = {
   'Arabic': '🇸🇦',
 };
 
+// ==================== Theme Utilities ====================
+export const THEME_KEY = 'gv_theme';
+
+export const getStoredTheme = () => {
+  try {
+    return localStorage.getItem(THEME_KEY) || null;
+  } catch (e) {
+    return null;
+  }
+};
+
+export const saveStoredTheme = (theme) => {
+  try {
+    if (!theme) localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, theme);
+  } catch (e) {
+    console.error('saveStoredTheme failed', e);
+  }
+};
+
+export const resolveThemeClass = (theme) => {
+  // theme: 'light' | 'dark' | 'default' | null
+  // default => treat as 'dark' per project requirements
+  if (!theme || theme === 'default' || theme === 'dark') return 'theme-dark';
+  if (theme === 'light') return 'theme-light';
+  return 'theme-dark';
+};
+
+export const applyTheme = (theme) => {
+  try {
+    const cls = resolveThemeClass(theme);
+    document.documentElement.classList.remove('theme-light', 'theme-dark');
+    document.documentElement.classList.add(cls);
+    // persist locally for anonymous users
+    saveStoredTheme(theme);
+  } catch (e) {
+    console.error('applyTheme failed', e);
+  }
+};
+
+export const initTheme = async (userService) => {
+  try {
+    // If userService is provided and user logged in, try fetching preferences
+    const user = authService.getCurrentUser();
+    if (user && user.user_id && userService && userService.getPreferences) {
+      try {
+        const prefs = await userService.getPreferences(user.user_id);
+        const them = prefs && prefs.theme ? prefs.theme : 'default';
+        applyTheme(them);
+        return;
+      } catch (e) {
+        console.warn('Could not fetch preferences for theme', e);
+      }
+    }
+
+    // Fallback to stored theme or default
+    const stored = getStoredTheme() || 'default';
+    applyTheme(stored);
+  } catch (e) {
+    console.error('initTheme failed', e);
+  }
+};
+
 export const SPEECH_LANGUAGES = {
   'en-US': 'English (US)',
   'en-GB': 'English (UK)',

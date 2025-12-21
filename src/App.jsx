@@ -27,8 +27,10 @@ const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:5000';
 import HistoryModal from './components/HistoryModal';
 import ProfileModal from './components/ProfileModal';
 import AuthModal from './components/AuthModal';
+// import * as utils from './utils.js';
 import { GoogleGenAI } from "@google/genai";
 import { io } from "socket.io-client"; 
+
 
 // ==================== HOME COMPONENT ====================
 function HomePage({ isActive }) {
@@ -264,21 +266,14 @@ function HomePage({ isActive }) {
               // update the last message with translated text
               setMessages((prev) => prev.map(m => m.id === newMessage.id ? { ...m, translated } : m));
 
-              try {
-                const uid = (authService.getCurrentUser() || {}).user_id || undefined;
-                if (!currentSessionId) {
-                  const ns = await sessionService.createSession(uid, 'home', 'New Home Chat');
-                  setCurrentSessionId(ns.id);
-                }
-                const sid = currentSessionId || (await sessionService.getSessions(uid, 'home'))[0].id;
-                await sessionService.addMessage(uid, 'home', sid, { sender: 'user', text: newMessage.text, translated: newMessage.translated });
-              } catch (e) {
-                console.error('Failed to persist home message', e);
-                const uid = (authService.getCurrentUser() || {}).user_id || null;
-                userService.logError({ user_id: uid, error_type: 'db', message: String(e), context: 'persist_home_message' }).catch(() => {});
+              const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+              if (!currentSessionId) {
+                const ns = await sessionService.createSession(uid, 'home', 'New Home Chat');
+                setCurrentSessionId(ns.id);
               }
-
-              setCurrentTranscript('');
+              const sid = currentSessionId || (await sessionService.getSessions(uid, 'home'))[0].id;
+              // Pass the freshly translated text variable so it gets persisted
+              await sessionService.addMessage(uid, 'home', sid, { sender: 'user', text: newMessage.text, translated });
               setIsListening(false);
             } catch (error) {
               console.error('Error:', error);
@@ -1005,7 +1000,33 @@ export default function App() {
   useEffect(() => {
     const onOpenAuth = () => setShowAuth(true);
     window.addEventListener('gv:open-auth', onOpenAuth);
-    return () => window.removeEventListener('gv:open-auth', onOpenAuth);
+
+    // Initialize theme on app start
+    (async () => {
+      try {
+        await utils.initTheme(userService);
+        // expose for ProfileModal fallback
+        window.applyTheme = utils.applyTheme;
+      } catch (e) {
+        console.error('Theme init failed', e);
+      }
+    })();
+
+    const onUserChanged = async () => {
+      // Re-init theme when user logs in/out
+      try {
+        await utils.initTheme(userService);
+      } catch (e) {
+        console.error('User change theme init failed', e);
+      }
+    };
+
+    window.addEventListener('gv:user-changed', onUserChanged);
+
+    return () => {
+      window.removeEventListener('gv:open-auth', onOpenAuth);
+      window.removeEventListener('gv:user-changed', onUserChanged);
+    };
   }, []);
 
   return (

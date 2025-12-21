@@ -203,6 +203,38 @@
   padding-bottom: 200px;
 }
 
+/* ==================== Light Theme Overrides ==================== */
+.theme-light .app-container {
+  background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+}
+.theme-light .app-wrapper {
+  background: rgba(255, 255, 255, 1);
+  backdrop-filter: none;
+  border-left: 1px solid rgba(2, 6, 23, 0.04);
+  border-right: 1px solid rgba(2, 6, 23, 0.04);
+  border-bottom: 1px solid rgba(2, 6, 23, 0.04);
+  box-shadow: 0 10px 30px rgba(2,6,23,0.06);
+}
+.theme-light .app-background { display: none; }
+.theme-light .app-header { background: rgba(255,255,255,0.9); border-bottom: 1px solid rgba(2,6,23,0.04); }
+.theme-light .app-header-title { color: #0f172a; }
+.theme-light .app-header-subtitle { color: #475569; }
+.theme-light .app-nav-tab { background: rgba(2,6,23,0.03); color: #0f172a; }
+.theme-light .app-nav-tab:hover { background: rgba(2,6,23,0.06); color: #0f172a; }
+.theme-light .app-nav-tab.active { background: linear-gradient(135deg, rgba(6,182,212,0.12), rgba(37,99,235,0.08)); color: #0369a1; border-color: rgba(6,182,212,0.12); }
+.theme-light .app-icon-button { background: rgba(2,6,23,0.03); color: #0f172a; }
+.theme-light .app-content { color: #0f172a; }
+.theme-light .home-title, .theme-light .home-subtitle { color: #0f172a; }
+.theme-light .message-bubble.user { background: rgba(6, 182, 212, 0.12); border-color: rgba(6,182,212,0.18); color: #083344; }
+.theme-light .message-bubble.ai { background: rgba(147, 116, 255, 0.10); border-color: rgba(147,116,255,0.14); color: #2b1b59; }
+.theme-light .message-time { color: #64748b; }
+.theme-light .empty-state-text, .theme-light .empty-state svg { color: #64748b; }
+.theme-light .control-deck { background: rgba(255,255,255,0.95); }
+.theme-light .language-selector-label span, .theme-light .language-button-name { color: #0f172a; }
+.theme-light .listening-indicator-text { color: #0f172a; }
+.theme-light .message-text { color: inherit; }
+
+
 .app-content::-webkit-scrollbar {
   width: 6px;
 }

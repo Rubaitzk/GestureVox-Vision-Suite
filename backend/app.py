@@ -594,8 +594,21 @@ def preferences():
     if not user_id:
         return jsonify({"error": "user_id required"}), 400
 
+    # Normalize types
+    try:
+        preferred_language_id = int(preferred_language_id) if preferred_language_id else None
+    except Exception:
+        preferred_language_id = None
+    try:
+        tts_speed = float(tts_speed) if (tts_speed is not None and tts_speed != '') else None
+    except Exception:
+        tts_speed = None
+
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
+
+    app.logger.info(f"Saving preferences for user_id={user_id} payload={{preferred_language_id: {preferred_language_id}, tts_voice: {tts_voice}, tts_speed: {tts_speed}, theme: {theme}}}")
+
     cursor.execute("SELECT preference_id FROM user_preferences WHERE user_id = %s", (user_id,))
     row = cursor.fetchone()
     if row:
@@ -605,9 +618,14 @@ def preferences():
         query = "INSERT INTO user_preferences (user_id, preferred_language_id, tts_voice, tts_speed, theme) VALUES (%s, %s, %s, %s, %s)"
         cursor.execute(query, (user_id, preferred_language_id, tts_voice, tts_speed, theme))
     conn.commit()
+
+    # Fetch and return the saved preferences
+    cursor.execute("SELECT * FROM user_preferences WHERE user_id = %s", (user_id,))
+    saved = cursor.fetchone()
+
     cursor.close()
     conn.close()
-    return jsonify({"status": "saved"}), 201
+    return jsonify(saved or {}), 201
 
 # ==========================================
 # SMART TTS ROUTE (Modified to Generate & Save)
