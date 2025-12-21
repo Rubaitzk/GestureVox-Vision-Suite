@@ -1,3 +1,8 @@
+import * as authService from './services/authService.js';
+
+// Backend URL for session persistence
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:5000';
+
 // ==================== Speech Recognition Utils ====================
 export const getSpeechRecognitionAPI = () => {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -60,6 +65,34 @@ export const speakText = (text, language = 'en-US') => {
     return Promise.resolve();
   }
 
+  // Fire-and-forget: request backend to generate and record TTS session when user is logged in
+  try {
+      const user = authService.getCurrentUser();
+      const client_token = authService.getClientToken();
+      // derive language code prefix (e.g., 'en' from 'en-US')
+      const language_code = String(language).split('-')[0] || 'en';
+      (async () => {
+        try {
+          const payload = user && user.user_id ? { user_id: user.user_id, input_text: text, language_code } : { client_token, input_text: text, language_code };
+          const resp = await fetch(`${BACKEND}/api/tts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!resp.ok) {
+            const txt = await resp.text().catch(() => '');
+            console.error(`/api/tts returned ${resp.status}: ${txt}`);
+          } else {
+            const data = await resp.json().catch(() => ({}));
+            console.debug('TTS session recorded', data);
+          }
+        } catch (err) {
+          console.error('Failed to call /api/tts:', err);
+        }
+      })();
+    } catch (e) {
+      console.error('speakText backend TTS log failed', e);
+    }
   return new Promise((resolve, reject) => {
     try {
       if (!text || String(text).trim().length === 0) {
@@ -132,7 +165,8 @@ export const speakText = (text, language = 'en-US') => {
 // 3. Rapid Translate (Has free tier)
 // Recommendation: MyMemory for simplicity (no key required)
 
-export const translateText = async (text, targetLanguage) => {
+export const translateText = async (text, targetLanguage, sourceLanguage = 'en') => {
+  let translated = text;
   try {
     // If Azure Translator env vars are present, use Azure Translator (preferred)
     const azureKey = import.meta.env.VITE_LANG_TRANS_API_KEY;
@@ -164,32 +198,61 @@ export const translateText = async (text, targetLanguage) => {
       const data = await resp.json();
       // response is an array; first item contains translations array
       if (Array.isArray(data) && data[0] && data[0].translations && data[0].translations[0]) {
-        return data[0].translations[0].text;
+        translated = data[0].translations[0].text;
+      } else {
+        throw new Error('Unexpected Azure Translator response');
+      }
+    } else {
+      // Fallback to MyMemory Translation API (free, no authentication required)
+      const response = await fetch(
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(sourceLanguage)}|${encodeURIComponent(targetLanguage)}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Translation API error');
       }
 
-      throw new Error('Unexpected Azure Translator response');
-    }
-    // Fallback to MyMemory Translation API (free, no authentication required)
-    const response = await fetch(
-      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLanguage}`
-    );
+      const data = await response.json();
 
-    if (!response.ok) {
-      throw new Error('Translation API error');
-    }
-
-    const data = await response.json();
-
-    if (data.responseStatus === 200) {
-      return data.responseData.translatedText;
-    } else {
-      throw new Error(data.responseDetails);
+      if (data.responseStatus === 200) {
+        translated = data.responseData.translatedText;
+      } else {
+        throw new Error(data.responseDetails);
+      }
     }
   } catch (error) {
     console.error('Translation error:', error);
-    // On error return original text as graceful fallback
-    return text;
+    // On error keep original text as graceful fallback
+    translated = text;
   }
+
+  // Fire-and-forget: persist translation session if user is logged in
+  try {
+      const user = authService.getCurrentUser();
+      const client_token = authService.getClientToken();
+      (async () => {
+        try {
+          const payload = user && user.user_id ? { user_id: user.user_id, input_text: text, source_lang: sourceLanguage, target_lang: targetLanguage } : { client_token, input_text: text, source_lang: sourceLanguage, target_lang: targetLanguage };
+          const resp = await fetch(`${BACKEND}/api/translation`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!resp.ok) {
+            const txt = await resp.text().catch(() => '');
+            console.error(`/api/translation returned ${resp.status}: ${txt}`);
+          } else {
+            const data = await resp.json().catch(() => ({}));
+            console.debug('Translation session recorded', data);
+          }
+        } catch (err) {
+          console.error('Failed to call /api/translation:', err);
+        }
+      })();
+    } catch (e) {
+      console.error('translateText backend save failed', e);
+    }
+  return translated;
 };
 
 // Language code mapping

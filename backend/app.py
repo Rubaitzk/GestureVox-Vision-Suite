@@ -1,17 +1,129 @@
 import os
-import mysql.connector
-import random
-from flask import Flask, jsonify, request, send_file
-from flask_cors import CORS
-from werkzeug.security import generate_password_hash, check_password_hash
-from gtts import gTTS
+import pickle
+import cv2
+import mediapipe as mp
+import numpy as np
+import time
 from deep_translator import GoogleTranslator
+import mysql.connector
+from flask import Flask, jsonify, request, Response
+from gtts import gTTS
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit
+import random
+import hashlib
 
 # 1. INITIALIZE APP (Must be before routes)
 app = Flask(__name__)
 # Enable CORS to allow requests from your React Frontend
 CORS(app) 
+socketio = SocketIO(app, cors_allowed_origins="*")
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, 'model.p')
+
+try:
+    model_dict = pickle.load(open(MODEL_PATH, 'rb'))
+    model = model_dict['model']
+except FileNotFoundError:
+    print("Warning: model.p not found. Real-time vision will not work.")
+    model = None
+
+
+mp_hands = mp.solutions.hands
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
+hands = mp_hands.Hands(static_image_mode=False, min_detection_confidence=0.5, max_num_hands=1)
+
+labels_dict = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G', 7: 'H', 8: 'I',
+               9: 'J', 10: 'K', 11: 'L', 12: 'M', 13: 'N', 14: 'O', 15: 'P', 16: 'Q', 17: 'R',
+               18: 'S', 19: 'T', 20: 'U', 21: 'V', 22: 'W', 23: 'SPACE', 24: 'DELETE'}
+
+# Logic Variables
+gesture_state = {
+    "current_sentence": "",
+    "last_predicted_char": "",
+    "prediction_counter": 0,
+    "last_add_time": 0
+}
+
+def generate_frames():
+    cap = cv2.VideoCapture(0)
+    CONFIRMATION_THRESHOLD = 15
+    COOLDOWN_TIME = 1.0
+
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+
+        H, W, _ = frame.shape
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands.process(frame_rgb)
+
+        if results.multi_hand_landmarks:
+            data_aux = []
+            x_ = []
+            y_ = []
+            hand_landmarks = results.multi_hand_landmarks[0]
+
+            # Draw for visual feedback in the stream
+            mp_drawing.draw_landmarks(
+                frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                mp_drawing_styles.get_default_hand_landmarks_style(),
+                mp_drawing_styles.get_default_hand_connections_style())
+
+            for i in range(len(hand_landmarks.landmark)):
+                x = hand_landmarks.landmark[i].x
+                y = hand_landmarks.landmark[i].y
+                x_.append(x)
+                y_.append(y)
+
+            for i in range(len(hand_landmarks.landmark)):
+                data_aux.append(hand_landmarks.landmark[i].x - min(x_))
+                data_aux.append(hand_landmarks.landmark[i].y - min(y_))
+
+            if model:
+                prediction = model.predict([np.asarray(data_aux)])
+                predicted_char = labels_dict[int(prediction[0])]
+
+                # --- START OF DRAWING LOGIC ---
+                # Calculate bounding box coordinates based on landmark min/max
+                x1, y1 = int(min(x_) * W) - 10, int(min(y_) * H) - 10
+                x2, y2 = int(max(x_) * W) + 10, int(max(y_) * H) + 10
+                
+                # Draw the Green Bounding Box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 4)
+                
+                # Draw the Predicted Character Text (Green)
+                cv2.putText(frame, predicted_char, (x1, y1 - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 0), 3, cv2.LINE_AA)
+                # --- END OF DRAWING LOGIC ---
+
+                # Debouncing Logic (Unchanged)
+                if predicted_char == gesture_state["last_predicted_char"]:
+                    gesture_state["prediction_counter"] += 1
+                else:
+                    gesture_state["prediction_counter"] = 0
+                    gesture_state["last_predicted_char"] = predicted_char
+
+                if gesture_state["prediction_counter"] >= CONFIRMATION_THRESHOLD:
+                    if time.time() - gesture_state["last_add_time"] > COOLDOWN_TIME:
+                        # Emit the single character to Frontend
+                        socketio.emit('new_letter', {'letter': predicted_char})
+                        gesture_state["last_add_time"] = time.time()
+                        gesture_state["prediction_counter"] = 0
+
+        # Encode frame
+        ret, buffer = cv2.imencode('.jpg', frame)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+    cap.release()
+
+@app.route('/api/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 # --- DATABASE CONFIGURATION ---
 # UPDATE THIS with your actual password
 db_config = {
@@ -43,6 +155,39 @@ def get_db_connection():
                 # If fallback also fails, raise original exception for clarity
                 raise
         raise
+
+# # Run simple DB migrations to support anonymous (client token) sessions
+# # Adds 'client_token' columns and allows user_id to be NULL so un-auth'd users
+# # can still have translation/tts records saved locally on the server.
+# def run_db_migrations():
+#     try:
+#         conn = get_db_connection()
+#         cursor = conn.cursor()
+#         try:
+#             cursor.execute("ALTER TABLE tts_sessions MODIFY user_id INT NULL")
+#         except Exception:
+#             pass
+#         try:
+#             cursor.execute("ALTER TABLE translation_sessions MODIFY user_id INT NULL")
+#         except Exception:
+#             pass
+#         try:
+#             cursor.execute("ALTER TABLE tts_sessions ADD COLUMN client_token VARCHAR(255) NULL")
+#         except Exception:
+#             pass
+#         try:
+#             cursor.execute("ALTER TABLE translation_sessions ADD COLUMN client_token VARCHAR(255) NULL")
+#         except Exception:
+#             pass
+#         conn.commit()
+#         cursor.close()
+#         conn.close()
+#         app.logger.info('DB migrations executed (if needed)')
+#     except Exception as e:
+#         app.logger.exception('DB migration failed')
+
+# # Execute migrations at startup
+# run_db_migrations()
 
 # ==========================================
 # HEALTH CHECK
@@ -472,9 +617,15 @@ def tts_sessions_api():
     # GET: Just fetch history
     if request.method == 'GET':
         user_id = request.args.get('user_id')
+        client_token = request.args.get('client_token')
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM tts_sessions WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+        if user_id:
+            cursor.execute("SELECT * FROM tts_sessions WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+        elif client_token:
+            cursor.execute("SELECT * FROM tts_sessions WHERE client_token = %s ORDER BY created_at DESC", (client_token,))
+        else:
+            cursor.execute("SELECT * FROM tts_sessions ORDER BY created_at DESC")
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -495,8 +646,15 @@ def tts_sessions_api():
     lang_res = cursor.fetchone()
     language_id = lang_res['language_id'] if lang_res else 1
 
-    query = "SELECT audio_path FROM tts_sessions WHERE input_text = %s AND language_id = %s LIMIT 1"
-    cursor.execute(query, (input_text, language_id))
+    client_token = data.get('client_token')
+
+    # Prefer user-specific or client-specific cached entry; otherwise fall back to global cache
+    if user_id or client_token:
+        query = "SELECT audio_path FROM tts_sessions WHERE input_text = %s AND language_id = %s AND (user_id = %s OR client_token = %s) LIMIT 1"
+        cursor.execute(query, (input_text, language_id, user_id, client_token))
+    else:
+        query = "SELECT audio_path FROM tts_sessions WHERE input_text = %s AND language_id = %s LIMIT 1"
+        cursor.execute(query, (input_text, language_id))
     existing_record = cursor.fetchone()
     
     if existing_record:
@@ -506,6 +664,7 @@ def tts_sessions_api():
 
     # 2. GENERATE
     try:
+        # Allow anonymous or client token usage: do not require user_id
         # Create unique filename
         filename = f"tts_{abs(hash(input_text))}_{language_code}.mp3"
         # Ensure static/audio folder exists
@@ -519,19 +678,22 @@ def tts_sessions_api():
         tts = gTTS(text=input_text, lang=language_code, slow=False)
         tts.save(save_path)
         
-        # 3. SAVE TO DB
+        # 3. SAVE TO DB (allow NULL user_id/client_token)
         cursor.execute("""
-            INSERT INTO tts_sessions (user_id, input_text, language_id, voice, audio_path) 
-            VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, input_text, language_id, 'gtts_default', web_path))
+            INSERT INTO tts_sessions (user_id, client_token, input_text, language_id, voice, audio_path) 
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (user_id if user_id else None, client_token if client_token else None, input_text, language_id, 'gtts_default', web_path))
         conn.commit()
-        
+        tts_id = cursor.lastrowid
+
+        app.logger.info(f"TTS session saved: tts_id={tts_id}, user_id={user_id}, client_token={client_token}, language_id={language_id}")
         cursor.close()
         conn.close()
         
-        return jsonify({"status": "success", "audio_path": web_path, "cached": False})
+        return jsonify({"status": "success", "audio_path": web_path, "cached": False, "tts_id": tts_id})
 
     except Exception as e:
+        app.logger.exception('TTS generation/storage failed')
         if 'cursor' in locals(): cursor.close()
         if 'conn' in locals(): conn.close()
         return jsonify({"error": str(e)}), 500
@@ -544,9 +706,15 @@ def translation_api():
     # GET: Fetch History
     if request.method == 'GET':
         user_id = request.args.get('user_id')
+        client_token = request.args.get('client_token')
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM translation_sessions WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+        if user_id:
+            cursor.execute("SELECT * FROM translation_sessions WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+        elif client_token:
+            cursor.execute("SELECT * FROM translation_sessions WHERE client_token = %s ORDER BY created_at DESC", (client_token,))
+        else:
+            cursor.execute("SELECT * FROM translation_sessions ORDER BY created_at DESC")
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -579,12 +747,22 @@ def translation_api():
         return jsonify({"error": "Invalid language codes provided"}), 400
 
     # 1. CHECK CACHE
-    query = """
-        SELECT output_text FROM translation_sessions 
-        WHERE input_text = %s AND source_language_id = %s AND target_language_id = %s
-        LIMIT 1
-    """
-    cursor.execute(query, (input_text, src_id, tgt_id))
+    client_token = data.get('client_token')
+
+    if user_id or client_token:
+        query = """
+            SELECT output_text FROM translation_sessions 
+            WHERE input_text = %s AND source_language_id = %s AND target_language_id = %s AND (user_id = %s OR client_token = %s)
+            LIMIT 1
+        """
+        cursor.execute(query, (input_text, src_id, tgt_id, user_id, client_token))
+    else:
+        query = """
+            SELECT output_text FROM translation_sessions 
+            WHERE input_text = %s AND source_language_id = %s AND target_language_id = %s
+            LIMIT 1
+        """
+        cursor.execute(query, (input_text, src_id, tgt_id))
     cached = cursor.fetchone()
 
     if cached:
@@ -594,23 +772,27 @@ def translation_api():
 
     # 2. TRANSLATE
     try:
+        # Allow anonymous or client_token usage: do not require user_id
         translator = GoogleTranslator(source=source_lang, target=target_lang)
         translated_text = translator.translate(input_text)
 
-        # 3. SAVE TO DB
+        # 3. SAVE TO DB (allow NULL user_id/client_token)
         cursor.execute("""
             INSERT INTO translation_sessions 
-            (user_id, input_text, output_text, source_language_id, target_language_id) 
-            VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, input_text, translated_text, src_id, tgt_id))
+            (user_id, client_token, input_text, output_text, source_language_id, target_language_id) 
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (user_id if user_id else None, client_token if client_token else None, input_text, translated_text, src_id, tgt_id))
         conn.commit()
+        translation_id = cursor.lastrowid
 
+        app.logger.info(f"Translation saved: id={translation_id}, user_id={user_id}, client_token={client_token}, src={src_id}, tgt={tgt_id}")
         cursor.close()
         conn.close()
 
-        return jsonify({"translated_text": translated_text, "cached": False})
+        return jsonify({"translated_text": translated_text, "cached": False, "translation_id": translation_id})
 
     except Exception as e:
+        app.logger.exception('Translation generation/storage failed')
         if 'cursor' in locals(): cursor.close()
         if 'conn' in locals(): conn.close()
         return jsonify({"error": str(e)}), 500
@@ -635,6 +817,10 @@ def log_error():
     cursor.close()
     conn.close()
     return jsonify({"status": "logged"}), 201
+
+# CV calling an giving back the genereated text
+
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

@@ -27,7 +27,8 @@ const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:5000';
 import HistoryModal from './components/HistoryModal';
 import ProfileModal from './components/ProfileModal';
 import AuthModal from './components/AuthModal';
-import { GoogleGenAI } from "@google/genai"; 
+import { GoogleGenAI } from "@google/genai";
+import { io } from "socket.io-client"; 
 
 // ==================== HOME COMPONENT ====================
 function HomePage({ isActive }) {
@@ -43,63 +44,107 @@ function HomePage({ isActive }) {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
+  const socketRef = useRef(null);
+  const currentTranscriptRef = useRef('');
 
   const languages = ['English', 'Urdu', 'Spanish', 'French'];
 
   const handleGlovesClick = () => {
-    // Toggle connection: when connecting, fetch one glove gesture and process it
+    // Toggle connection: if currently connected disconnect and finalize any pending transcript
     if (glovesConnected) {
       setGlovesConnected(false);
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+
+      if (currentTranscriptRef.current && currentTranscriptRef.current.trim().length > 0) {
+        (async () => {
+          setIsProcessing(true);
+          try {
+            const text = currentTranscriptRef.current.trim();
+            const newMessage = {
+              id: generateMessageId(),
+              source: 'user',
+              text,
+              translated: null,
+              language: navigator.language || 'unknown',
+              timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, newMessage]);
+
+            const targetCode = LANGUAGE_CODES[selectedLanguage] || 'en';
+            const translated = await translateText(text, targetCode);
+            setMessages((prev) => prev.map(m => m.id === newMessage.id ? { ...m, translated } : m));
+
+            const uid = (authService.getCurrentUser() || {}).user_id || undefined;
+            if (!currentSessionId) {
+              const ns = await sessionService.createSession(uid, 'home', 'New Home Chat');
+              setCurrentSessionId(ns.id);
+            }
+            const sid = currentSessionId || (await sessionService.getSessions(uid, 'home'))[0].id;
+            await sessionService.addMessage(uid, 'home', sid, { sender: 'user', text, translated });
+          } catch (e) {
+            console.error('Glove finalize failed', e);
+            const uid = (authService.getCurrentUser() || {}).user_id || null;
+            userService.logError({ user_id: uid, error_type: 'glove', message: String(e), context: 'home_glove_finalize' }).catch(() => {});
+          } finally {
+            setIsProcessing(false);
+            setCurrentTranscript('');
+            currentTranscriptRef.current = '';
+          }
+        })();
+      }
+
       return;
     }
 
-    // connect and process one gesture
-    (async () => {
-      setGlovesConnected(true);
-      try {
-        setIsProcessing(true);
-        const res = await fetch(`${BACKEND}/api/glove/simulate`);
-        if (!res.ok) throw new Error('Glove simulate failed');
-        const data = await res.json();
-        const text = data.gesture_text;
+    // Connect to backend Socket.IO to receive live letters and show preview
+    setGlovesConnected(true);
+    setGlovesProcessing(true);
+    try {
+      socketRef.current = io(BACKEND);
 
-        // create a new user message and attempt translation like mic
-        const newMessage = {
-          id: generateMessageId(),
-          source: 'user',
-          text,
-          translated: null,
-          language: navigator.language || 'unknown',
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, newMessage]);
+      socketRef.current.on('connect', () => {
+        setGlovesProcessing(false);
+      });
 
-        try {
-          const targetCode = LANGUAGE_CODES[selectedLanguage] || 'en';
-          const translated = await translateText(text, targetCode);
-          setMessages((prev) => prev.map(m => m.id === newMessage.id ? { ...m, translated } : m));
+      socketRef.current.on('new_letter', async (data) => {
+        const letter = data?.letter;
+        if (!letter) return;
 
-          // persist
-          const uid = (authService.getCurrentUser() || {}).user_id || undefined;
-          if (!currentSessionId) {
-            const ns = await sessionService.createSession(uid, 'home', 'New Home Chat');
-            setCurrentSessionId(ns.id);
-          }
-          const sid = currentSessionId || (await sessionService.getSessions(uid, 'home'))[0].id;
-          await sessionService.addMessage(uid, 'home', sid, { sender: 'user', text, translated });
-        } catch (e) {
-          console.error('Glove processing failed', e);
-          const uid = (authService.getCurrentUser() || {}).user_id || null;
-          userService.logError({ user_id: uid, error_type: 'glove', message: String(e), context: 'home_glove_process' }).catch(() => {});
+        if (letter === 'SPACE') {
+          // Append a space to the current transcript (do NOT finalize/send)
+          setCurrentTranscript(prev => {
+            const next = (prev || '') + ' ';
+            currentTranscriptRef.current = next;
+            return next;
+          });
+        } else if (letter === 'DELETE') {
+          setCurrentTranscript(prev => {
+            const next = (prev || '').slice(0, -1);
+            currentTranscriptRef.current = next;
+            return next;
+          });
+        } else {
+          setCurrentTranscript(prev => {
+            const next = (prev || '') + letter;
+            currentTranscriptRef.current = next;
+            return next;
+          });
         }
-      } catch (e) {
-        console.error('Glove simulate error', e);
-        const uid = (authService.getCurrentUser() || {}).user_id || null;
-        userService.logError({ user_id: uid, error_type: 'glove_simulate', message: String(e), context: 'glove_fetch' }).catch(() => {});
-      } finally {
-        setIsProcessing(false);
-      }
-    })();
+      });
+
+      socketRef.current.on('disconnect', () => {
+        setGlovesConnected(false);
+      });
+    } catch (e) {
+      console.error('Glove socket error', e);
+      const uid = (authService.getCurrentUser() || {}).user_id || null;
+      userService.logError({ user_id: uid, error_type: 'glove_socket', message: String(e), context: 'home_glove_socket' }).catch(() => {});
+      setGlovesProcessing(false);
+      setGlovesConnected(false);
+    }
   };
 
   useEffect(() => {
@@ -161,6 +206,21 @@ function HomePage({ isActive }) {
       window.removeEventListener('gv:load-session', loadHandler);
     };
   }, []);
+
+  // cleanup sockets on unmount
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+    };
+  }, []);
+
+  // keep a ref in sync with currentTranscript for use inside socket handlers
+  useEffect(() => {
+    currentTranscriptRef.current = currentTranscript;
+  }, [currentTranscript]);
 
   const handleStartListening = () => {
     if (isListening) {
@@ -401,14 +461,23 @@ function HomePage({ isActive }) {
             <span className="control-button-label">Clear</span>
           </button>
 
-          <button
-            onClick={handleGlovesClick}
-            className={`gloves-button ${glovesConnected ? 'connected' : 'not-connected'}`}
-            title="Gloves connection status"
-          >
-            <span className="gloves-label">Gloves</span>
-            <span className="gloves-status">{glovesConnected ? 'Connected' : 'Not Connected'}</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <button
+              onClick={handleGlovesClick}
+              className={`gloves-button ${glovesConnected ? 'connected' : 'not-connected'}`}
+              title="Gloves connection status"
+            >
+              <span className="gloves-label">Gloves</span>
+              <span className="gloves-status">{glovesConnected ? 'Connected' : 'Not Connected'}</span>
+            </button>
+            {glovesConnected && (
+              <img
+                src={`${BACKEND}/api/video_feed`}
+                alt="Glove camera stream"
+                style={{ width: 160, height: 120, objectFit: 'cover', borderRadius: 8, marginLeft: '0.75rem' }}
+              />
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -430,11 +499,37 @@ function ChatbotPage({ isActive }) {
   const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('English');
+  const languages = ['English', 'Urdu', 'Spanish', 'French'];
+
+  // when language changes, re-translate visible messages
+  const handleLanguageChange = (language) => {
+    setSelectedLanguage(language);
+    (async () => {
+      try {
+        const targetCode = LANGUAGE_CODES[language] || 'en';
+        const translatedMessages = await Promise.all(messages.map(async (m) => {
+          if (!m || !m.text) return m;
+          try {
+            const t = await translateText(m.text, targetCode);
+            return { ...m, translated: t };
+          } catch (err) {
+            return m;
+          }
+        }));
+        setMessages(translatedMessages);
+      } catch (err) {
+        console.error('Language change re-translation failed', err);
+      }
+    })();
+  };
+
   // Gloves state used by the chatbot control buttons (was missing and caused a runtime error)
   const [glovesConnected, setGlovesConnected] = useState(false);
   const [glovesProcessing, setGlovesProcessing] = useState(false);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
+  const socketRef = useRef(null);
+  const gloveBufferRef = useRef('');
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -498,6 +593,17 @@ function ChatbotPage({ isActive }) {
     return () => {
       window.removeEventListener('gv:new-session', newHandler);
       window.removeEventListener('gv:load-session', loadHandler);
+    };
+  }, []);
+
+  // cleanup socket for chatbot on unmount
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      gloveBufferRef.current = '';
     };
   }, []);
 
@@ -603,8 +709,17 @@ function ChatbotPage({ isActive }) {
         id: generateMessageId(),
         role: 'assistant',
         text: response.text,
+        translated: null,
         timestamp: new Date(),
       };
+
+      // Attempt to auto-translate assistant reply into the selected language for display
+      try {
+        const targetCode = LANGUAGE_CODES[selectedLanguage] || 'en';
+        assistantMessage.translated = await translateText(assistantMessage.text, targetCode);
+      } catch (err) {
+        console.error('Assistant translation failed', err);
+      }
 
       setMessages((prev) => [...prev, assistantMessage]);
       try {
@@ -640,6 +755,27 @@ function ChatbotPage({ isActive }) {
   return (
     <div className="app-content">
       <div className="chatbot-container">
+        {/* Language selector */}
+        <div className="language-selector" style={{ marginBottom: '0.5rem' }}>
+          <div className="language-selector-label">
+            <Languages />
+            <span>Select Output Language</span>
+          </div>
+          <div className="language-selector-grid">
+            {languages.map((lang) => (
+              <button
+                key={lang}
+                className={`language-button ${selectedLanguage === lang ? 'active' : ''}`}
+                onClick={() => handleLanguageChange(lang)}
+              >
+                <div className="language-button-flag">{LANGUAGE_FLAGS[lang]}</div>
+                <div className="language-button-name">{lang}</div>
+                <div className="language-button-code">{LANGUAGE_CODES[lang]}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Chat Messages */}
         <div className="chatbot-conversation" ref={scrollRef}>
           {messages.map((msg) => (
@@ -659,7 +795,14 @@ function ChatbotPage({ isActive }) {
                 )}
               </div>
               <div className={`message-bubble ${msg.role === 'user' ? 'user' : 'ai'}`}>
-                <p className="message-text">{msg.translated || msg.text}</p>
+                {msg.translated && msg.translated !== msg.text ? (
+                  <>
+                    <p className="message-text" style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.25rem' }}>{msg.text}</p>
+                    <p className="message-text">{msg.translated}</p>
+                  </>
+                ) : (
+                  <p className="message-text">{msg.text}</p>
+                )}
                 <span className="message-time">{formatTime(msg.timestamp)}</span>
               </div>
             </div>
@@ -714,32 +857,72 @@ function ChatbotPage({ isActive }) {
           <div className="control-buttons" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <button
-                onClick={async () => {
+                onClick={() => {
                   if (glovesProcessing) return;
-                  if (glovesConnected) { setGlovesConnected(false); return; }
+                  if (glovesConnected) {
+                    setGlovesConnected(false);
+                    if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null; }
+                    if (gloveBufferRef.current && gloveBufferRef.current.trim().length > 0) {
+                      setInputText(gloveBufferRef.current);
+                      gloveBufferRef.current = '';
+                    }
+                    return;
+                  }
+
                   setGlovesConnected(true);
                   setGlovesProcessing(true);
+
                   try {
-                    const res = await fetch(`${BACKEND}/api/glove/simulate`);
-                    if (!res.ok) throw new Error('Glove simulate failed');
-                    const data = await res.json();
-                    const text = data.gesture_text;
-                    try {
-                      const targetCode = LANGUAGE_CODES[selectedLanguage] || 'en';
-                      const translated = await translateText(text, targetCode);
-                      setInputText(translated || text);
-                    } catch (err) {
-                      console.error('Glove translation failed', err);
-                      const uid = (authService.getCurrentUser() || {}).user_id || null;
-                      userService.logError({ user_id: uid, error_type: 'glove', message: String(err), context: 'chatbot_glove_translate' }).catch(() => {});
-                      setInputText(text);
-                    }
+                    socketRef.current = io(BACKEND);
+
+                    socketRef.current.on('connect', () => {
+                      setGlovesProcessing(false);
+                    });
+
+                    socketRef.current.on('new_letter', async (data) => {
+                      const letter = data?.letter;
+                      if (!letter) return;
+
+                      if (letter === 'SPACE') {
+                        // Translate the current glove buffer into the selected language and append to the input (do NOT send)
+                        const text = gloveBufferRef.current.trim();
+                        if (!text) {
+                          // If buffer is empty, interpret SPACE as a literal space in the input
+                          setInputText(prev => (prev || '') + ' ');
+                        } else {
+                          try {
+                            const translated = await translateText(text, LANGUAGE_CODES[selectedLanguage] || 'en');
+                            setInputText(prev => ((prev ? prev + ' ' : '') + (translated || text) + ' '));
+                          } catch (err) {
+                            console.error('Glove translation failed', err);
+                            setInputText(prev => ((prev ? prev + ' ' : '') + text + ' '));
+                          } finally {
+                            gloveBufferRef.current = '';
+                          }
+                        }
+                      } else if (letter === 'DELETE') {
+                        // If there is a buffer, delete from it; otherwise delete from the visible input
+                        if (gloveBufferRef.current && gloveBufferRef.current.length > 0) {
+                          gloveBufferRef.current = gloveBufferRef.current.slice(0, -1);
+                          setInputText(gloveBufferRef.current);
+                        } else {
+                          setInputText(prev => (prev || '').slice(0, -1));
+                        }
+                      } else {
+                        gloveBufferRef.current += letter;
+                        setInputText(gloveBufferRef.current);
+                      }
+                    });
+
+                    socketRef.current.on('disconnect', () => {
+                      setGlovesConnected(false);
+                    });
                   } catch (e) {
-                    console.error('Glove simulate error', e);
+                    console.error('Glove socket error', e);
                     const uid = (authService.getCurrentUser() || {}).user_id || null;
-                    userService.logError({ user_id: uid, error_type: 'glove_simulate', message: String(e), context: 'chatbot_glove_fetch' }).catch(() => {});
-                  } finally {
+                    userService.logError({ user_id: uid, error_type: 'glove_socket', message: String(e), context: 'chatbot_glove_socket' }).catch(() => {});
                     setGlovesProcessing(false);
+                    setGlovesConnected(false);
                   }
                 }}
                 className={`gloves-button ${glovesConnected ? 'connected' : 'not-connected'}`}
